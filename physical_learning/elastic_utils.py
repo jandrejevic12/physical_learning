@@ -23,10 +23,11 @@ class Elastic:
 		Graph specifying the nodes and edge connections of the elastic network.
 	params : dict, optional
 		Specifies system parameters. Required keywords are:
-		rfac : factor of shortest edge length that should correspond to node radius (used for plotting)
-		drag : coefficient of isotropic drag
-		dashpot : coefficient of dashpot damping at each edge
-		stiffness : initial stiffness assigned to each edge spring
+
+			* 'rfac': factor of shortest edge length that should correspond to node radius (used for plotting)
+			* 'drag': coefficient of isotropic drag
+			* 'dashpot': coefficient of dashpot damping at each edge
+			* 'stiffness': initial stiffness assigned to each edge spring
 	'''
 	def __init__(self, graph, params={'rfac':0.05, 'drag':0.005, 'dashpot':10., 'stiffness':1.}):
 		self.params = params
@@ -120,10 +121,11 @@ class Elastic:
 	def save(self, filename):
 		'''Save network to a file.
 		   File contents are written as follows:
-		   n : int, number of nodes
-		   next n entries : floats, (x,y) positions of nodes
-		   ne : int, number of edges
-		   next ne entries : ints, (i,j,k) node indices connecting edge, and properties
+
+		   	* n: int, number of nodes
+		   	* next n entries: floats, (x,y) positions of nodes
+		   	* ne: int, number of edges
+		   	* next ne entries: ints, (i,j,k) node indices connecting edge, and properties
 		
 		Parameters
 		----------
@@ -288,26 +290,19 @@ class Elastic:
 			The degrees of freedom.
 		args : tuple
 			Collection of simulation arguments:
-			T : float
-				Period for oscillatory force. If T = 0, nodes with an applied force are held stationary.
-			network : tuple of arrays
-				Network edge properties obtained from edge_lists().
-			applied_args : tuple
-				Simulation arguments, which can vary by problem.
-			train : int, optional
-				The type of training to perform. If train = 0 (default), no training is done. If train = 1,
+			
+				* T: Period for oscillatory force. If T = 0, nodes with an applied force are held stationary.
+				* network: Network edge properties obtained from edge_lists().
+				* applied_args: Simulation arguments, which can vary by problem.
+				* train: The type of training to perform. If train = 0 (default), no training is done. If train = 1,
 				train lengths using method 'aging' or 'learning'. If train = 2, train stiffnesses using
 				method 'aging' or 'learning'.
-			method : string, optional, 'aging' or 'learning'
-				Used only if train is nonzero. Specifies the type of training approach to use. Default is
+				* method: Used only if train is nonzero. Specifies the type of training approach to use. Default is
 				'learning'.
-			eta : float, optional
-				Learning rate by which to increment applied strain towards the target. Default is 1, which
+				* eta: Learning rate by which to increment applied strain towards the target. Default is 1, which
 				corresponds to pinning directly at the target.
-			alpha : float, optional
-				Aging rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
-			pbar : bool, optional
-				Whether to display a progress bar. Default is True. 
+				* alpha: Aging rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
+				* pbar: Whether to display a progress bar. Default is True. 
 
 		Returns
 		-------
@@ -349,26 +344,19 @@ class Elastic:
 			The degrees of freedom.
 		args : tuple
 			Collection of simulation arguments:
-			T : float
-				Period for oscillatory force. If T = 0, nodes with an applied force are held stationary.
-			network : tuple of arrays
-				Network edge properties obtained from edge_lists().
-			applied_args : tuple
-				Simulation arguments, which can vary by problem.
-			train : int, optional
-				The type of training to perform. If train = 0 (default), no training is done. If train = 1,
+			
+				* T: Period for oscillatory force. If T = 0, nodes with an applied force are held stationary.
+				* network: Network edge properties obtained from edge_lists().
+				* applied_args: Simulation arguments, which can vary by problem.
+				* train: The type of training to perform. If train = 0 (default), no training is done. If train = 1,
 				train lengths using method 'aging' or 'learning'. If train = 2, train stiffnesses using
 				method 'aging' or 'learning'.
-			method : string, optional, 'aging' or 'learning'
-				Used only if train is nonzero. Specifies the type of training approach to use. Default is
+				* method: Used only if train is nonzero. Specifies the type of training approach to use. Default is
 				'learning'.
-			eta : float, optional
-				Learning rate by which to increment applied strain towards the target. Default is 1, which
+				* eta: Learning rate by which to increment applied strain towards the target. Default is 1, which
 				corresponds to pinning directly at the target.
-			alpha : float, optional
-				Aging rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
-			pbar : bool, optional
-				Whether to display a progress bar. Default is True. 
+				* alpha: Aging rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
+				* pbar: Whether to display a progress bar. Default is True.
 
 		Returns
 		-------
@@ -437,26 +425,19 @@ class Elastic:
 			The degrees of freedom.
 		args : tuple
 			Collection of simulation arguments:
-			T : float
-				Period for oscillatory force. If T = 0, nodes with an applied force are held stationary.
-			network : tuple of arrays
-				Network edge properties obtained from edge_lists().
-			applied_args : tuple
-				Simulation arguments, which can vary by problem.
-			train : int, optional
-				The type of training to perform. If train = 0 (default), no training is done. If train = 1,
+			
+				* T: Period for oscillatory force. If T = 0, nodes with an applied force are held stationary.
+				* network: Network edge properties obtained from edge_lists().
+				* applied_args: Simulation arguments, which can vary by problem.
+				* train: The type of training to perform. If train = 0 (default), no training is done. If train = 1,
 				train lengths using method 'aging' or 'learning'. If train = 2, train stiffnesses using
 				method 'aging' or 'learning'.
-			method : string, optional, 'aging' or 'learning'
-				Used only if train is nonzero. Specifies the type of training approach to use. Default is
+				* method: Used only if train is nonzero. Specifies the type of training approach to use. Default is
 				'learning'.
-			eta : float, optional
-				Learning rate by which to increment applied strain towards the target. Default is 1, which
+				* eta: Learning rate by which to increment applied strain towards the target. Default is 1, which
 				corresponds to pinning directly at the target.
-			alpha : float, optional
-				Aging rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
-			pbar : bool, optional
-				Whether to display a progress bar. Default is True. 
+				* alpha: Aging rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
+				* pbar: Whether to display a progress bar. Default is True.
 
 		Returns
 		-------
