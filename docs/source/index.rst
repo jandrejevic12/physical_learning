@@ -1,4 +1,4 @@
-Documentation for the physical_learning repository
+Documentation for the Physical Learning Repository
 ==================================================
 
 Check out the :doc:`usage` section for further information, including

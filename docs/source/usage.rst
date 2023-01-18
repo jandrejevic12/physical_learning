@@ -6,11 +6,11 @@ Usage
 Installation
 ------------
 
-To use Lumache, first install it using pip:
+Installation here
 
 .. code-block:: console
 
-   (.venv) $ pip install lumache
+   (.venv) $ demo here
 
 Creating recipes
 ----------------
@@ -28,7 +28,7 @@ will raise an exception.
 
 For example:
 
->>> import lumache
+>>> import *
 >>> lumache.get_random_ingredients()
 ['shells', 'gorgonzola', 'parsley']
 
