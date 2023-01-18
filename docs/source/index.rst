@@ -12,6 +12,6 @@ Contents
 --------
 
 .. toctree::
+    :maxdepth: 4
 
-   usage
-   api
+    physical_learning
