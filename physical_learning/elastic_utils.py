@@ -17,68 +17,18 @@ from numba import jit
 class Elastic:
 	'''Class to simulate an elastic network with trainable bonds and rest lengths.
 		
-	Attributes
+	Parameters
 	----------
-	graph : networkx graph object
-		Graph specifying the nodes and edges in the network. A stiffness, rest length,
-		and "trainable" parameter are associated with each edge. A trainable edge means
-		it will be updated during training.
-	seed : int
-		A random seed used for selecting sources and targets at random.
-	n : int
-		Number of nodes in the network.
-	ne : int
-		Number of edges in the network.
-	params : dict
-    	Specifies system parameters. Required keywords are:
-    	rfac : factor of shortest edge length that should correspond to node radius (used for plotting)
-    	drag : coefficient of isotropic drag
-    	dashpot : coefficient of dashpot damping at each edge
-    	stiffness : initial stiffness assigned to each edge spring
-    pts : float array, shape (n,2)
-		(x,y) coordinates for each node in the system.
-	degree : int array, shape (n,)
-		The degree (number of neighbors) of each node.
-	Z : float
-		The average coordination number, defined as 2*ne/nc, where nc is the number of nodes in the
-		biggest connected component of the system.
-	dZ : float
-		The excess coordination, defined as Z - Ziso, where Ziso is the average coordination required
-		for isostaticity (Ziso = 4 - 6/nc in 2D).
-	traj : float array, shape (frames+1, n, 2)
-		The simulated trajectory of the network produced after a call to the solve() routine. Frames is
-		the number of output frames specified for solve, plus one for the initial condition.
-	t_eval : float array, shape (frames+1,)
-		The corresponding time at each simulated frame.
-	
-	Methods
-	-------
-	save(filename)
-		Save network to a file.
-	solve(duration, frames, T, applied_args, train=0, method='learning', eta=1., alpha=1e-3, pbar=True)
-		A multipurpose routine for numerical integration of the network. When train = 0, simply
-		integrates the system under specified applied strain. When train is nonzero, adjusts the edge
-		rest lengths or stiffnesses according to directed aging or coupled learning update rules.
-	reset_init()
-		Resets the network node positions to the initial, relaxed state.
-	set_frame(fr)
-		Set the network state to a particular frame of the simulation.
-	plot_network(ax)
-		Plot the network of nodes and edges.
+	graph : string (filename) or networkx graph object
+		Graph specifying the nodes and edge connections of the elastic network.
+	params : dict, optional
+		Specifies system parameters. Required keywords are:
+		rfac : factor of shortest edge length that should correspond to node radius (used for plotting)
+		drag : coefficient of isotropic drag
+		dashpot : coefficient of dashpot damping at each edge
+		stiffness : initial stiffness assigned to each edge spring
 	'''
 	def __init__(self, graph, params={'rfac':0.05, 'drag':0.005, 'dashpot':10., 'stiffness':1.}):
-		'''
-		Parameters
-    	----------
-    	graph : string (filename) or networkx graph object
-    		Graph specifying the nodes and edge connections of the elastic network.
-    	params : dict, optional
-    		Specifies system parameters. Required keywords are:
-    		rfac : factor of shortest edge length that should correspond to node radius (used for plotting)
-    		drag : coefficient of isotropic drag
-    		dashpot : coefficient of dashpot damping at each edge
-    		stiffness : initial stiffness assigned to each edge spring
-    	'''
 		self.params = params
 		self.graph = graph
 
@@ -1043,7 +993,8 @@ class Elastic:
 
 		Returns
 		-------
-		p : The value of the sine pulse at the current time.
+		p : float
+			The value of the sine pulse at the current time.
 		'''
 		return np.sin(2*np.pi*t/T)
 
@@ -1059,7 +1010,8 @@ class Elastic:
 
 		Returns
 		-------
-		p : The value of the cosine pulse at the current time.
+		p : float
+			The value of the cosine pulse at the current time.
 		'''
 		return np.cos(2*np.pi*t/T)
 
@@ -1075,7 +1027,8 @@ class Elastic:
 
 		Returns
 		-------
-		p : The value of the ramp function at the current time.
+		p : float
+			The value of the ramp function at the current time.
 		'''
 		q = t/T
 		if q > 1: q=1
