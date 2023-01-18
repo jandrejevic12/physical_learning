@@ -1,11 +1,6 @@
-physical learning package
-=========================
 
-Submodules
-----------
-
-elastic_utils module
-----------------------
+elastic_utils
+-------------
 
 .. automodule:: physical_learning.elastic_utils
     :members:
