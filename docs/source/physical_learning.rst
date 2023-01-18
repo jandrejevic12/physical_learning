@@ -2,7 +2,7 @@
 elastic_utils
 -------------
 
-.. automodule:: physical_learning.elastic_utils
+.. automodule:: elastic_utils.Elastic
     :members:
     :undoc-members:
     :show-inheritance:
