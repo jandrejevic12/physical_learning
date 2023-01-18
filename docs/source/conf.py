@@ -42,7 +42,8 @@ sys.path.insert(0, os.path.abspath('./../..'))
 # to display docs when using C-based packages
 import mock
  
-MOCK_MODULES = ['numpy', 'scipy', 'matplotlib', 'matplotlib.pyplot', 'scipy.interpolate']
+MOCK_MODULES = ['numpy', 'scipy', 'scipy.integrate', 'scipy.spatial', 'scipy.linalg',
+		'matplotlib', 'matplotlib.pyplot', 'matplotlib.collections', 'matplotlib.animation', 'matplotlib.ticker']
 for mod_name in MOCK_MODULES:
-sys.modules[mod_name] = mock.Mock()
+    sys.modules[mod_name] = mock.Mock()
 
