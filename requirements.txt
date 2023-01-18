@@ -1,0 +1,13 @@
+cmocean==2.0
+colorspacious==1.1.2
+matplotlib==3.5.1
+networkx==2.7.1
+notebook==6.4.11
+numba==0.53.1
+numpy==1.22.3
+pandas==1.4.3
+poisson-disc==0.2.1
+scikit-image==0.19.2
+scikit-learn==1.1.1
+scipy==1.7.3
+tqdm==4.64.0
