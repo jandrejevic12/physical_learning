@@ -56,6 +56,11 @@ class Elastic:
 		The simulated trajectory of the network produced after a call to the solve() routine.
 	t_eval : ndarray
 		The corresponding time at each simulated frame.
+
+	Methods
+	-------
+	reset_init()
+		Reset the network to its initial, relaxed state.
 	'''
 
 	def __init__(self, graph, params={'rfac':0.05, 'drag':0.005, 'dashpot':10., 'stiffness':1.}):
