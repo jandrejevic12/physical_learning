@@ -4,4 +4,4 @@ Examples
 .. toctree::
    :maxdepth: 2
 
-   packing_link
+   notebooks/make_packing_network
