@@ -41,6 +41,9 @@ napoleon_numpy_docstring = True
 napoleon_use_ivar = True
 add_module_names = False
 
+# -- Options for nbsphinx
+nbsphinx_execute = 'never'
+
 import os
 import sys
 #Location of Sphinx files
