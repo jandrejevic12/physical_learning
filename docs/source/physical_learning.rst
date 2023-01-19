@@ -1,5 +1,8 @@
 :tocdepth: 3
 
+Documentation for the Physical Learning Repository
+==================================================
+
 Packing Class
 -------------
 
