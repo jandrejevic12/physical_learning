@@ -16,9 +16,23 @@ from numba import jit
 
 class Elastic:
 	'''Class to simulate an elastic network with trainable bonds and rest lengths.
+	
+	Parameters
+	----------
+	graph : str (filename) or networkx graph object
+		Graph specifying the nodes and edge connections of the elastic network.
+	params : dict, optional
+		Specifies system parameters. Required keywords are :
+
+		- 'rfac': factor of shortest edge length that should correspond to node radius (used for plotting)
+		- 'drag': coefficient of isotropic drag
+		- 'dashpot': coefficient of dashpot damping at each edge
+		- 'stiffness': initial stiffness assigned to each edge spring
 
 	The following are several key attributes of the Elastic class:
-
+	
+	Attributes
+	----------
 	graph : networkx graph object
 		Graph specifying the nodes and edges in the network. A stiffness, rest length,
 		and "trainable" parameter are associated with each edge. A trainable edge means
@@ -47,20 +61,6 @@ class Elastic:
 	'''
 
 	def __init__(self, graph, params={'rfac':0.05, 'drag':0.005, 'dashpot':10., 'stiffness':1.}):
-		'''Class to simulate an elastic network with trainable bonds and rest lengths.
-
-		Parameters
-		----------
-		graph : str (filename) or networkx graph object
-			Graph specifying the nodes and edge connections of the elastic network.
-		params : dict, optional
-			Specifies system parameters. Required keywords are:
-
-				* 'rfac': factor of shortest edge length that should correspond to node radius (used for plotting)
-				* 'drag': coefficient of isotropic drag
-				* 'dashpot': coefficient of dashpot damping at each edge
-				* 'stiffness': initial stiffness assigned to each edge spring
-		'''
 
 		self.params = params
 		self.graph = graph
@@ -331,20 +331,20 @@ class Elastic:
 		q : ndarray
 			The degrees of freedom.
 		args : tuple
-			Collection of simulation arguments:
+			Collection of simulation arguments :
 			
-				* T: Period for oscillatory force. If T = 0, nodes with an applied force are held stationary.
-				* network: Network edge properties obtained from _edge_lists().
-				* applied_args: Simulation arguments, which can vary by problem.
-				* train: The type of training to perform. If train = 0 (default), no training is done. If train = 1,
-				train lengths using method 'aging' or 'learning'. If train = 2, train stiffnesses using
-				method 'aging' or 'learning'.
-				* method: Used only if train is nonzero. Specifies the type of training approach to use. Default is
-				'learning'.
-				* eta: Learning rate by which to increment applied strain towards the target. Default is 1, which
-				corresponds to pinning directly at the target.
-				* alpha: Aging rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
-				* pbar: Whether to display a progress bar. Default is True. 
+			- T: Period for oscillatory force. If T = 0, nodes with an applied force are held stationary.
+			- network: Network edge properties obtained from _edge_lists().
+			- applied_args: Simulation arguments, which can vary by problem.
+			- train: The type of training to perform. If train = 0 (default), no training is done. If train = 1,
+			train lengths using method 'aging' or 'learning'. If train = 2, train stiffnesses using
+			method 'aging' or 'learning'.
+			- method: Used only if train is nonzero. Specifies the type of training approach to use. Default is
+			'learning'.
+			- eta: Learning rate by which to increment applied strain towards the target. Default is 1, which
+			corresponds to pinning directly at the target.
+			- alpha: Aging rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
+			- pbar: Whether to display a progress bar. Default is True. 
 
 		Returns
 		-------
@@ -384,20 +384,20 @@ class Elastic:
 		q : ndarray
 			The degrees of freedom.
 		args : tuple
-			Collection of simulation arguments:
+			Collection of simulation arguments :
 			
-				* T: Period for oscillatory force. If T = 0, nodes with an applied force are held stationary.
-				* network: Network edge properties obtained from _edge_lists().
-				* applied_args: Simulation arguments, which can vary by problem.
-				* train: The type of training to perform. If train = 0 (default), no training is done. If train = 1,
-				train lengths using method 'aging' or 'learning'. If train = 2, train stiffnesses using
-				method 'aging' or 'learning'.
-				* method: Used only if train is nonzero. Specifies the type of training approach to use. Default is
-				'learning'.
-				* eta: Learning rate by which to increment applied strain towards the target. Default is 1, which
-				corresponds to pinning directly at the target.
-				* alpha: Aging rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
-				* pbar: Whether to display a progress bar. Default is True.
+			- T: Period for oscillatory force. If T = 0, nodes with an applied force are held stationary.
+			- network: Network edge properties obtained from _edge_lists().
+			- applied_args: Simulation arguments, which can vary by problem.
+			- train: The type of training to perform. If train = 0 (default), no training is done. If train = 1,
+			train lengths using method 'aging' or 'learning'. If train = 2, train stiffnesses using
+			method 'aging' or 'learning'.
+			- method: Used only if train is nonzero. Specifies the type of training approach to use. Default is
+			'learning'.
+			- eta: Learning rate by which to increment applied strain towards the target. Default is 1, which
+			corresponds to pinning directly at the target.
+			- alpha: Aging rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
+			- pbar: Whether to display a progress bar. Default is True. 
 
 		Returns
 		-------
@@ -467,20 +467,20 @@ class Elastic:
 		q : ndarray
 			The degrees of freedom.
 		args : tuple
-			Collection of simulation arguments:
+			Collection of simulation arguments :
 			
-				* T: Period for oscillatory force. If T = 0, nodes with an applied force are held stationary.
-				* network: Network edge properties obtained from _edge_lists().
-				* applied_args: Simulation arguments, which can vary by problem.
-				* train: The type of training to perform. If train = 0 (default), no training is done. If train = 1,
-				train lengths using method 'aging' or 'learning'. If train = 2, train stiffnesses using
-				method 'aging' or 'learning'.
-				* method: Used only if train is nonzero. Specifies the type of training approach to use. Default is
-				'learning'.
-				* eta: Learning rate by which to increment applied strain towards the target. Default is 1, which
-				corresponds to pinning directly at the target.
-				* alpha: Aging rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
-				* pbar: Whether to display a progress bar. Default is True.
+			- T: Period for oscillatory force. If T = 0, nodes with an applied force are held stationary.
+			- network: Network edge properties obtained from _edge_lists().
+			- applied_args: Simulation arguments, which can vary by problem.
+			- train: The type of training to perform. If train = 0 (default), no training is done. If train = 1,
+			train lengths using method 'aging' or 'learning'. If train = 2, train stiffnesses using
+			method 'aging' or 'learning'.
+			- method: Used only if train is nonzero. Specifies the type of training approach to use. Default is
+			'learning'.
+			- eta: Learning rate by which to increment applied strain towards the target. Default is 1, which
+			corresponds to pinning directly at the target.
+			- alpha: Aging rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
+			- pbar: Whether to display a progress bar. Default is True. 
 
 		Returns
 		-------
