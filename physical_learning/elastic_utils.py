@@ -28,6 +28,21 @@ class Elastic:
 		- 'drag': coefficient of isotropic drag
 		- 'dashpot': coefficient of dashpot damping at each edge
 		- 'stiffness': initial stiffness assigned to each edge spring
+
+	The following are several key attributes of the Elastic class:
+	
+	Attributes
+	----------
+	graph : networkx graph object
+		Graph specifying the nodes and edges in the network. A stiffness, rest length,
+		and "trainable" parameter are associated with each edge. A trainable edge means
+		it will be updated during training.
+	seed : int
+		A random seed used for selecting sources and targets at random.
+	n : int
+		Number of nodes in the network.
+	ne : int
+		Number of edges in the network.
 	'''
 
 	def __init__(self, graph, params={'rfac':0.05, 'drag':0.005, 'dashpot':10., 'stiffness':1.}):

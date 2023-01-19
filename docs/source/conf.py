@@ -37,6 +37,7 @@ epub_show_urls = 'footnote'
 # -- Options for docstring
 napoleon_google_docstring = False
 napoleon_numpy_docstring = True
+napoleon_use_ivar = True
 
 import os
 import sys
