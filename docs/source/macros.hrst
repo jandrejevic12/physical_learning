@@ -1,1 +1,2 @@
-.. ndarray replace:: :class:`numpy.ndarray`
+.. |ndarray| replace:: :class:`numpy.ndarray`
+.. |ndarrays| replace:: :class:`numpy.ndarray`
