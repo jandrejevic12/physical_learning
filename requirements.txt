@@ -1,4 +1,4 @@
-sphinx>=1.4
+sphinx>=2.2.0
 ipykernel
 nbsphinx
 cmocean==2.0
