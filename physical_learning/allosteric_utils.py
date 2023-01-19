@@ -1,7 +1,7 @@
 import numpy as np
 
 from plot_imports import *
-from elastic_utils import *
+from elastic_utils import Elastic
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
