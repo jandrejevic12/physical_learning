@@ -12,3 +12,16 @@ Elastic Class
     :members:
     :show-inheritance:
 
+Allosteric Class
+----------------
+
+.. autoclass:: physical_learning.allosteric_utils.Allosteric
+    :members:
+    :show-inheritance:
+
+LAMMPS helper modules
+---------------------
+
+.. automodule:: physical_learning.lammps_utils
+    :members:
+
