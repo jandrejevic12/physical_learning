@@ -4,4 +4,4 @@ Examples
 .. toctree::
    :maxdepth: 2
 
-   make_packing_network
+   physical_learning/make_packing_network
