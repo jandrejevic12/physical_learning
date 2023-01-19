@@ -34,8 +34,8 @@ class Elastic:
 	----------
 	graph : networkx.graph
 		Graph specifying the nodes and edges in the network. A stiffness, rest length,
-		and "trainable" parameter are associated with each edge. A trainable edge means
-		it will be updated during training.
+		and "trainable" parameter are associated with each edge. A trainable edge will
+		be updated during training.
 	seed : int
 		A random seed used for selecting sources and targets at random.
 	n : int
@@ -56,11 +56,6 @@ class Elastic:
 		The simulated trajectory of the network produced after a call to the solve() routine.
 	t_eval : ndarray
 		The corresponding time at each simulated frame.
-
-	Methods
-	-------
-	reset_init()
-		Reset the network to its initial, relaxed state.
 	'''
 
 	def __init__(self, graph, params={'rfac':0.05, 'drag':0.005, 'dashpot':10., 'stiffness':1.}):
@@ -240,7 +235,7 @@ class Elastic:
 			Whether to display a progress bar. Default is True. 
 		'''
 
-		edge_i, edge_j, edge_k, edge_l, edge_t = self.__edge_lists()
+		edge_i, edge_j, edge_k, edge_l, edge_t = self._edge_lists()
 		network = (edge_i, edge_j, edge_k, edge_l, edge_t)
 		n = self.n
 
@@ -294,7 +289,7 @@ class Elastic:
 			for e, edge in enumerate(self.graph.edges(data=True)):
 				edge[2]['stiffness'] = edge_k[e]
 
-	def __edge_lists(self):
+	def _edge_lists(self):
 		'''Copy edge properties stored in networkx object into numpy arrays for easy access.
 
 		Returns
@@ -1105,7 +1100,7 @@ class Elastic:
 		mask[::2] = self.degree > 0
 		mask[1::2] = self.degree > 0
 
-		edge_i, edge_j, edge_k, edge_l, edge_t = self.__edge_lists()
+		edge_i, edge_j, edge_k, edge_l, edge_t = self._edge_lists()
 		network = (edge_i, edge_j, edge_k, edge_l, edge_t)
 
 		self._elastic_jacobian(t, self.n, q, edge_l, edge_k, hess, network)
