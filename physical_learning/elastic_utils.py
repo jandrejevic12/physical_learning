@@ -29,8 +29,10 @@ class Elastic:
 			* 'dashpot': coefficient of dashpot damping at each edge
 			* 'stiffness': initial stiffness assigned to each edge spring
 
-	Attributes
-	----------
+	The following are several key attributes of the Elastic class:
+
+	Returns
+	-------
 	graph : networkx graph object
 		Graph specifying the nodes and edges in the network. A stiffness, rest length,
 		and "trainable" parameter are associated with each edge. A trainable edge means
@@ -157,13 +159,6 @@ class Elastic:
 
 	def save(self, filename):
 		'''Save the network to a file.
-
-	   File contents are written as follows:
-
-	   	* n: int, number of nodes
-	   	* next n entries: floats, (x,y) positions of nodes
-	   	* ne: int, number of edges
-	   	* next ne entries: ints, (i,j,k) node indices connecting edge, and properties
 		
 		Parameters
 		----------
