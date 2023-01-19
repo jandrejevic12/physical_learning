@@ -27,14 +27,14 @@ class Packing:
 	params : dict, optional
 		Specifies system parameters. Required keywords are :
 
-    	- central: strength of the force pulling disks toward origin.
-    	- drag: coefficient of isotropic drag.
-    	- contact: strength of contact repulsion.
+		- 'central': strength of the force pulling disks toward origin
+		- 'drag': coefficient of isotropic drag
+		- 'contact': strength of contact repulsion
 
 	seed : int, optional
 		A random seed used for initializing the positions of the disks, and assigning
 		which are large or small.
-
+	
 	Attributes
 	----------
 	n : int
@@ -49,7 +49,7 @@ class Packing:
 		The simulated trajectory of the network produced after a call to the generate() routine.
 	t_eval : ndarray
 		The corresponding time at each simulated frame.
-    graph : networkx.graph
+	graph : networkx.graph
 		Graph specifying the nodes and edges in the final contact network.
 	'''
 
