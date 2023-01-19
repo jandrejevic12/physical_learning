@@ -1,1 +1,1 @@
-.. include:: ../../physical_learning/make_packing_network.ipynb
+.. include:: ../../physical_learning/make_packing_network
