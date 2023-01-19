@@ -50,7 +50,7 @@ import mock
 MOCK_MODULES = ['numpy', 'scipy', 'scipy.integrate', 'scipy.spatial', 'scipy.linalg', 'cmocean', 'networkx',
 		'numba', 'pandas', 'poisson_disc', 'skimage', 'sklearn', 'tqdm',
 		'matplotlib', 'matplotlib.pyplot', 'matplotlib.collections', 'matplotlib.animation', 'matplotlib.ticker',
-		'plot_imports', 'packing_utils', 'elastic_utils', 'elastic_utils.Elastic', 'allosteric_utils', 'lammps_utils']
+		'plot_imports', 'packing_utils', 'elastic_utils', 'Elastic', 'allosteric_utils', 'lammps_utils']
 for mod_name in MOCK_MODULES:
     sys.modules[mod_name] = mock.Mock()
 
