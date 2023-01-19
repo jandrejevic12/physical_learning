@@ -17,22 +17,8 @@ from numba import jit
 class Elastic:
 	'''Class to simulate an elastic network with trainable bonds and rest lengths.
 
-	Parameters
-	----------
-	graph : str (filename) or networkx graph object
-		Graph specifying the nodes and edge connections of the elastic network.
-	params : dict, optional
-		Specifies system parameters. Required keywords are:
-
-			* 'rfac': factor of shortest edge length that should correspond to node radius (used for plotting)
-			* 'drag': coefficient of isotropic drag
-			* 'dashpot': coefficient of dashpot damping at each edge
-			* 'stiffness': initial stiffness assigned to each edge spring
-
 	The following are several key attributes of the Elastic class:
 
-	Returns
-	-------
 	graph : networkx graph object
 		Graph specifying the nodes and edges in the network. A stiffness, rest length,
 		and "trainable" parameter are associated with each edge. A trainable edge means
@@ -61,6 +47,21 @@ class Elastic:
 	'''
 
 	def __init__(self, graph, params={'rfac':0.05, 'drag':0.005, 'dashpot':10., 'stiffness':1.}):
+		'''Class to simulate an elastic network with trainable bonds and rest lengths.
+
+		Parameters
+		----------
+		graph : str (filename) or networkx graph object
+			Graph specifying the nodes and edge connections of the elastic network.
+		params : dict, optional
+			Specifies system parameters. Required keywords are:
+
+				* 'rfac': factor of shortest edge length that should correspond to node radius (used for plotting)
+				* 'drag': coefficient of isotropic drag
+				* 'dashpot': coefficient of dashpot damping at each edge
+				* 'stiffness': initial stiffness assigned to each edge spring
+		'''
+
 		self.params = params
 		self.graph = graph
 
