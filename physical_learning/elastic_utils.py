@@ -19,8 +19,9 @@ class Elastic:
 	
 	Parameters
 	----------
-	graph : str (filename) or networkx graph object
-		Graph specifying the nodes and edge connections of the elastic network.
+	graph : str or networkx.graph
+		If string, filename of saved graph specifying the nodes and edge connections of
+		the elastic network. If networkx.graph object, the graph to use.
 	params : dict, optional
 		Specifies system parameters. Required keywords are :
 
@@ -28,12 +29,10 @@ class Elastic:
 		- 'drag': coefficient of isotropic drag
 		- 'dashpot': coefficient of dashpot damping at each edge
 		- 'stiffness': initial stiffness assigned to each edge spring
-
-	The following are several key attributes of the Elastic class:
 	
 	Attributes
 	----------
-	graph : networkx graph object
+	graph : networkx.graph
 		Graph specifying the nodes and edges in the network. A stiffness, rest length,
 		and "trainable" parameter are associated with each edge. A trainable edge means
 		it will be updated during training.
@@ -43,6 +42,20 @@ class Elastic:
 		Number of nodes in the network.
 	ne : int
 		Number of edges in the network.
+	pts : ndarray
+		(x,y) coordinates for each node in the system.
+	degree : ndarray
+		The degree (number of neighbors) of each node.
+	Z : float
+		The average coordination number, defined as 2*ne/nc, where nc is the number of nodes in the
+		biggest connected component of the system.
+	dZ : float
+		The excess coordination, defined as Z - Ziso, where Ziso is the average coordination required
+		for isostaticity (Ziso = 4 - 6/nc in 2D).
+	traj : ndarray
+		The simulated trajectory of the network produced after a call to the solve() routine.
+	t_eval : ndarray
+		The corresponding time at each simulated frame.
 	'''
 
 	def __init__(self, graph, params={'rfac':0.05, 'drag':0.005, 'dashpot':10., 'stiffness':1.}):
@@ -166,14 +179,14 @@ class Elastic:
 
 		Parameters
 		----------
-		p : |ndarray|
+		p : ndarray
 			The positions, or array of positions, of the first point.
-		q : |ndarray|
+		q : ndarray
 			The positions, or array of positions, of the second point.
 
 		Returns
 		-------
-		float or |ndarray|
+		float or ndarray
 			The distance between the two points.
 		'''
 
@@ -281,15 +294,15 @@ class Elastic:
 
 		Returns
 		-------
-		edge_i : |ndarray|
+		edge_i : ndarray
 			Integer array of the first nodes in each pairwise interaction.
-		edge_j : |ndarray|
+		edge_j : ndarray
 			Integer array of the second nodes in each pairwise interaction.
-		edge_k : |ndarray|
+		edge_k : ndarray
 			The stiffness of each bond.
-		edge_l : |ndarray|
+		edge_l : ndarray
 			The rest length of each bond.
-		edge_t : |ndarray|
+		edge_t : ndarray
 			Boolean array indicating whether each bond is trainable or not.
 		'''
 
@@ -313,7 +326,7 @@ class Elastic:
 		----------
 		t : float
 			The current time.
-		q : |ndarray|
+		q : ndarray
 			The degrees of freedom.
 		args : tuple
 			Collection of simulation arguments :
@@ -366,7 +379,7 @@ class Elastic:
 		----------
 		t : float
 			The current time.
-		q : |ndarray|
+		q : ndarray
 			The degrees of freedom.
 		args : tuple
 			Collection of simulation arguments :
@@ -386,7 +399,7 @@ class Elastic:
 
 		Returns
 		-------
-		|ndarray|
+		ndarray
 			Derivative of the degrees of freedom.
 		'''
 
@@ -449,7 +462,7 @@ class Elastic:
 		----------
 		t : float
 			The current time.
-		q : |ndarray|
+		q : ndarray
 			The degrees of freedom.
 		args : tuple
 			Collection of simulation arguments :
@@ -469,7 +482,7 @@ class Elastic:
 
 		Returns
 		-------
-		|ndarray|
+		ndarray
 			Jacobian of the derivative.
 		'''
 
@@ -521,11 +534,11 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : |ndarray|
+		q : ndarray
 			The positions and velocities of nodes in the system.
-		fun : |ndarray|
+		fun : ndarray
 			Derivative array in which to store velocities and drag forces.
-		network : tuple of |ndarrays|
+		network : tuple of ndarrays
 			Network edge properties obtained from _edge_lists().
 		b : float
 			The drag coefficient.
@@ -551,11 +564,11 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : |ndarray|
+		q : ndarray
 			The positions and velocities of nodes in the system.
-		jac : |ndarray|
+		jac : ndarray
 			Subblock of jacobian in which to store derivative of drag force.
-		network : tuple of |ndarrays|
+		network : tuple of ndarrays
 			Network edge properties obtained from _edge_lists().
 		b : float
 			The drag coefficient.
@@ -575,15 +588,15 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : |ndarray|
+		q : ndarray
 			The positions of the nodes.
-		l : |ndarray|
+		l : ndarray
 			The rest length of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		k : |ndarray|
+		k : ndarray
 			The stiffness of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		network : tuple of |ndarrays|
+		network : tuple of ndarrays
 			Network edge properties obtained from _edge_lists().
 
 		Returns
@@ -613,17 +626,17 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : |ndarray|
+		q : ndarray
 			The positions of the nodes.
-		l : |ndarray|
+		l : ndarray
 			The rest length of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		k : |ndarray|
+		k : ndarray
 			The stiffness of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		acc : |ndarray|
+		acc : ndarray
 			The acceleration of each node, populated as output.
-		network : tuple of |ndarrays|
+		network : tuple of ndarrays
 			Network edge properties obtained from _edge_lists().
 		'''
 
@@ -650,17 +663,17 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : |ndarray|
+		q : ndarray
 			The positions of the nodes.
-		l : |ndarray|
+		l : ndarray
 			The rest length of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		k : |ndarray|
+		k : ndarray
 			The stiffness of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		jac :|ndarray|
+		jac :ndarray
 			The jacobian of elastic forces, populated as output.
-		network : tuple of |ndarrays|
+		network : tuple of ndarrays
 			Network edge properties obtained from _edge_lists().
 		'''
 
@@ -705,17 +718,17 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : |ndarray|
+		q : ndarray
 			The positions of the nodes.
-		l : |ndarray|
+		l : ndarray
 			The rest length of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		k : |ndarray|
+		k : ndarray
 			The stiffness of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		acc : |ndarray|
+		acc : ndarray
 			The acceleration of each node, populated as output.
-		network : tuple of |ndarrays|
+		network : tuple of ndarrays
 			Network edge properties obtained from _edge_lists().
 		b : float
 			The dashpot damping coefficient.
@@ -749,19 +762,19 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : |ndarray|
+		q : ndarray
 			The positions of the nodes.
-		l : |ndarray|
+		l : ndarray
 			The rest length of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		k : |ndarray|
+		k : ndarray
 			The stiffness of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		jacx : |ndarray|
+		jacx : ndarray
 			The jacobian subblock to populate.
-		jacv : |ndarray|
+		jacv : ndarray
 			The jacobian subblock to populate.
-		network : tuple of |ndarrays|
+		network : tuple of ndarrays
 			Network edge properties obtained from _edge_lists().
 		b : float
 			The dashpot damping coefficient.
@@ -837,19 +850,19 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : |ndarray|
+		q : ndarray
 			The positions of the nodes in the free state.
-		_q : |ndarray|
+		_q : ndarray
 			The positions of the nodes in the clamped state.
-		l : |ndarray|
+		l : ndarray
 			The rest length of each bond.
-		dl : |ndarray|
+		dl : ndarray
 			The derivative of the rest lengths with time, populated on output.
 		eta : float
 			The learning rate.
 		alpha : float
 			The aging rate.
-		network : tuple of |ndarrays|
+		network : tuple of ndarrays
 			Network edge properties obtained from _edge_lists().
 		'''
 
@@ -884,19 +897,19 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : |ndarray|
+		q : ndarray
 			The positions of the nodes in the free state.
-		_q : |ndarray|
+		_q : ndarray
 			The positions of the nodes in the clamped state.
-		l : |ndarray|
+		l : ndarray
 			The rest length of each bond.
-		dl : |ndarray|
+		dl : ndarray
 			The derivative of the rest lengths with time, populated on output.
 		eta : float
 			The learning rate.
 		alpha : float
 			The aging rate.
-		network : tuple of |ndarrays|
+		network : tuple of ndarrays
 			Network edge properties obtained from _edge_lists().
 		'''
 
@@ -924,19 +937,19 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : |ndarray|
+		q : ndarray
 			The positions of the nodes in the free state.
-		_q : |ndarray|
+		_q : ndarray
 			The positions of the nodes in the clamped state.
-		k : |ndarray|
+		k : ndarray
 			The stiffness of each bond.
-		dk : |ndarray|
+		dk : ndarray
 			The derivative of the stiffnesses with time, populated on output.
 		eta : float
 			The learning rate.
 		alpha : float
 			The aging rate.
-		network : tuple of |ndarrays|
+		network : tuple of ndarrays
 			Network edge properties obtained from _edge_lists().
 		'''
 
@@ -971,19 +984,19 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : |ndarray|
+		q : ndarray
 			The positions of the nodes in the free state.
-		_q : |ndarray|
+		_q : ndarray
 			The positions of the nodes in the clamped state.
-		k : |ndarray|
+		k : ndarray
 			The stiffness of each bond.
-		dk : |ndarray|
+		dk : ndarray
 			The derivative of the stiffnesses with time, populated on output.
 		eta : float
 			The learning rate.
 		alpha : float
 			The aging rate.
-		network : tuple of |ndarrays|
+		network : tuple of ndarrays
 			Network edge properties obtained from _edge_lists().
 		'''
 
@@ -1072,9 +1085,9 @@ class Elastic:
 
 		Returns
 		-------
-		evals : |ndarray|
+		evals : ndarray
 			Eigenvalues.
-		evecs : |ndarray|
+		evecs : ndarray
 			Unit eigenvectors stored in each column.
 		'''
 
@@ -1103,7 +1116,7 @@ class Elastic:
 
 		Returns
 		-------
-		|ndarray|
+		ndarray
 			The particles' trajectories corrected for rigid translation and rotation.
 		'''
 
@@ -1175,7 +1188,7 @@ class Elastic:
 
 		Parameters
 		----------
-		ax : |matplotlib.axes.Axes|
+		ax : matplotlib.axes.Axes
 			The axes to set up.
 		'''
 
@@ -1189,7 +1202,7 @@ class Elastic:
 		
 		Returns
 		-------
-		|ndarray|
+		ndarray
 			Array storing the endpoints of each edge.
 		'''
 
@@ -1204,15 +1217,15 @@ class Elastic:
 
 		Parameters
 		----------
-		ax : |matplotlib.axes.Axes|
+		ax : matplotlib.axes.Axes
 			The axes on which to plot.
 
 		Returns
 		-------
-		ec : |matplotlib.collections.LineCollection|
+		ec : matplotlib.collections.LineCollection
 			Handle to the plotted edges.
 
-		dc : |matplotlib.collections.EllipseCollection|
+		dc : matplotlib.collections.EllipseCollection
 			Handle to the plotted nodes.
 		'''
 

@@ -1,5 +1,3 @@
-.. include:: macros.hrst
-
 Elastic Class
 -------------
 
