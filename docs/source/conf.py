@@ -14,8 +14,7 @@ version = '0.1.0'
 extensions = [
     'sphinx.ext.duration',
     'sphinx.ext.doctest',
-    'sphinx.ext.autodoc',
-    'sphinx.ext.autosummary',
+    'sphinx.ext.autodocsumm',
     'sphinx.ext.intersphinx',
     'sphinx.ext.napoleon',
 ]
@@ -29,7 +28,6 @@ intersphinx_disabled_domains = ['std']
 templates_path = ['_templates']
 
 # -- Options for HTML output
-
 html_theme = 'sphinx_rtd_theme'
 
 # -- Options for EPUB output
@@ -38,6 +36,7 @@ epub_show_urls = 'footnote'
 # -- Options for docstring
 napoleon_google_docstring = False
 napoleon_numpy_docstring = True
+autodoc_default_options = {"autosummary": True}
 
 import os
 import sys
