@@ -1,7 +1,9 @@
-elastic_utils
+.. include:: macros.hrst
+
+Elastic Class
 -------------
 
-.. automodule:: physical_learning.elastic_utils
+.. autoclass:: physical_learning.elastic_utils.Elastic
     :members:
     :show-inheritance:
 
