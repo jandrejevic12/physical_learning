@@ -16,6 +16,34 @@ from numba import jit
 
 class Elastic:
 	'''Class to simulate an elastic network with trainable bonds and rest lengths.
+
+	Attributes
+	----------
+	graph : networkx graph object
+		Graph specifying the nodes and edges in the network. A stiffness, rest length,
+		and "trainable" parameter are associated with each edge. A trainable edge means
+		it will be updated during training.
+	seed : int
+		A random seed used for selecting sources and targets at random.
+	n : int
+		Number of nodes in the network.
+	ne : int
+		Number of edges in the network.
+    pts : float array, shape (n,2)
+		(x,y) coordinates for each node in the system.
+	degree : int array, shape (n,)
+		The degree (number of neighbors) of each node.
+	Z : float
+		The average coordination number, defined as 2*ne/nc, where nc is the number of nodes in the
+		biggest connected component of the system.
+	dZ : float
+		The excess coordination, defined as Z - Ziso, where Ziso is the average coordination required
+		for isostaticity (Ziso = 4 - 6/nc in 2D).
+	traj : float array, shape (frames+1, n, 2)
+		The simulated trajectory of the network produced after a call to the solve() routine. Frames is
+		the number of output frames specified for solve, plus one for the initial condition.
+	t_eval : float array, shape (frames+1,)
+		The corresponding time at each simulated frame.
 		
 	Parameters
 	----------
@@ -47,8 +75,8 @@ class Elastic:
 		for i in range(self.n):
 			self.pts[i,:] = self.graph.nodes[i]['pos']
 			self._pts[i,:] = self.graph.nodes[i]['pos']
-		self.set_attributes()
-		self.set_coordination()
+		self._set_attributes()
+		self._set_coordination()
 
 		self.pts_init = np.copy(self.pts)
 
@@ -62,24 +90,24 @@ class Elastic:
 	*****************************************************************************************************
 	'''
 
-	def set_attributes(self):
+	def _set_attributes(self):
 		'''Set the rest length attribute of each edge.'''
 		min_l = 0
 		for edge in self.graph.edges(data=True):
 			i = edge[0]; j = edge[1]
-			l = self.distance(self.pts[i], self.pts[j])
+			l = self._distance(self.pts[i], self.pts[j])
 			edge[2]['length'] = l
 			if l > min_l:
 				min_l = l
 		self.params['radius'] = self.params['rfac']*min_l
 
-	def set_degree(self):
+	def _set_degree(self):
 		'''Compute the degree (number of neighbors) of each node.'''
 		self.degree = np.array(list(self.graph.degree[i] for i in range(self.n)), dtype=int)
 
-	def set_coordination(self):
+	def _set_coordination(self):
 		'''Compute the average coordination and excess coordination of the network.'''
-		self.set_degree()
+		self._set_degree()
 		self.ne = len(self.graph.edges())
 		self.nc = self.n-np.sum(self.degree==0).astype(int) # connected nodes
 		self.Z = 2*self.ne/float(self.nc)
@@ -91,7 +119,7 @@ class Elastic:
 		self.pts = np.copy(self.pts_init)
 		self._pts = np.copy(self.pts_init)
 
-	def remove_dangling_edges(self):
+	def _remove_dangling_edges(self):
 		'''Remove connections to nodes with only one bond.'''
 		remove = []
 		for i in range(self.n):
@@ -104,7 +132,7 @@ class Elastic:
 			except:
 				pass
 
-	def prune_bonds(self, tol=1e-8):
+	def _prune_bonds(self, tol=1e-8):
 		'''Prune bonds that are within a tolerance of 0 in stiffness. Dangling edges
 			are subsequently removed, and coordination is recomputed.
 		'''
@@ -115,8 +143,8 @@ class Elastic:
 		for edge in remove:
 				self.graph.remove_edge(edge[0],edge[1])
 
-		self.remove_dangling_edges()
-		self.set_coordination()
+		self._remove_dangling_edges()
+		self._set_coordination()
 
 	def save(self, filename):
 		'''Save network to a file.
@@ -141,17 +169,19 @@ class Elastic:
 			for edge in self.graph.edges(data=True):
 				f.write('{:d} {:d} {:.12g} {:.12g} {:d}\n'.format(edge[0],edge[1],edge[2]['stiffness'], edge[2]['length'], edge['trainable']))
 
-	def distance(self, p, q):
+	def _distance(self, p, q):
 		'''Compute the distance between two coordinate pairs p and q.
 
 		Parameters
 		----------
-		p, q : float arrays
-			The positions, or array of positions, of two points.
+		p : ndarray
+			The positions, or array of positions, of the first point.
+		q : ndarray
+			The positions, or array of positions, of the second point.
 
 		Returns
 		-------
-		d : float or float array
+		d : float or ndarray
 			The distance between the two points.
 		'''
 		return np.sqrt(np.sum(np.square(p - q), axis=-1))
@@ -166,7 +196,7 @@ class Elastic:
 	*****************************************************************************************************
 	'''
 
-	def solve(self, duration, frames, T, applied_args, train=0, method='learning', eta=1., alpha=1e-3, pbar=True):
+	def solve(self, duration, frames, T, applied_args, train=0, method='learning', eta=1., alpha=1e-3, pbar=True):	
 		'''Numerically integrate the elastic network in time. Optionally train edge stiffnesses or rest
 			lengths using directed aging or coupled learning. Produces an output trajectory of shape
 			(frames+1, n, 2) stored in the attribute 'traj', and corresponding times in 't_eval'.
@@ -196,7 +226,7 @@ class Elastic:
 		pbar : bool, optional
 			Whether to display a progress bar. Default is True. 
 		'''
-		edge_i, edge_j, edge_k, edge_l, edge_t = self.edge_lists()
+		edge_i, edge_j, edge_k, edge_l, edge_t = self.__edge_lists()
 		network = (edge_i, edge_j, edge_k, edge_l, edge_t)
 		n = self.n
 
@@ -216,21 +246,21 @@ class Elastic:
 			with tqdm(total=tf-ti, unit='sim. time', initial=ti, ascii=True, 
 					  bar_format='{l_bar}{bar}| {n:.2f}/{total:.2f} [{elapsed}<{remaining}]', desc='progress') as self.pbar:
 				if train:
-					sol = solve_ivp(self.ff, t_span, q, t_eval=self.t_eval,
+					sol = solve_ivp(self._ff, t_span, q, t_eval=self.t_eval,
 									args=(T, network, applied_args, train, method, eta, alpha, pbar),
 									method='RK23')
 				else:
-					sol = solve_ivp(self.ff, t_span, q, t_eval=self.t_eval, jac=self.jj,
+					sol = solve_ivp(self._ff, t_span, q, t_eval=self.t_eval, jac=self._jj,
 									args=(T, network, applied_args, train, method, eta, alpha, pbar),
 									method='BDF')
 
 		else:
 			if train:
-				sol = solve_ivp(self.ff, t_span, q, t_eval=self.t_eval,
+				sol = solve_ivp(self._ff, t_span, q, t_eval=self.t_eval,
 								args=(T, network, applied_args, train, method, eta, alpha, pbar),
 								method='RK23')
 			else:
-				sol = solve_ivp(self.ff, t_span, q, t_eval=self.t_eval, jac=self.jj,
+				sol = solve_ivp(self._ff, t_span, q, t_eval=self.t_eval, jac=self._jj,
 								args=(T, network, applied_args, train, method, eta, alpha, pbar),
 								method='BDF')
 
@@ -250,21 +280,21 @@ class Elastic:
 			for e, edge in enumerate(self.graph.edges(data=True)):
 				edge[2]['stiffness'] = edge_k[e]
 
-	def edge_lists(self):
+	def __edge_lists(self):
 		'''Copy edge properties stored in networkx object into numpy arrays for easy access.
 
 		Returns
 		-------
-		edge_i : int array
-			The first neighbor in each pairwise interaction.
-		edge_j : int array
-			The second neighbor in each pairwise interaction.
-		edge_k : float array
+		edge_i : ndarray
+			Integer array of the first nodes in each pairwise interaction.
+		edge_j : ndarray
+			Integer array of the second nodes in each pairwise interaction.
+		edge_k : ndarray
 			The stiffness of each bond.
-		edge_l : float array
+		edge_l : ndarray
 			The rest length of each bond.
-		edge_t : bool array
-			Whether each bond is trainable or not.
+		edge_t : ndarray
+			Boolean array indicating whether each bond is trainable or not.
 		'''
 		edge_i = np.zeros(self.ne, dtype=int)
 		edge_j = np.zeros(self.ne, dtype=int)
@@ -286,13 +316,13 @@ class Elastic:
 		----------
 		t : float
 			The current time.
-		q : float array
+		q : ndarray
 			The degrees of freedom.
 		args : tuple
 			Collection of simulation arguments:
 			
 				* T: Period for oscillatory force. If T = 0, nodes with an applied force are held stationary.
-				* network: Network edge properties obtained from edge_lists().
+				* network: Network edge properties obtained from _edge_lists().
 				* applied_args: Simulation arguments, which can vary by problem.
 				* train: The type of training to perform. If train = 0 (default), no training is done. If train = 1,
 				train lengths using method 'aging' or 'learning'. If train = 2, train stiffnesses using
@@ -324,29 +354,27 @@ class Elastic:
 			k = edge_k
 
 		en = 0.
-		en += self.elastic_energy(t, n, q, l, k, network)
-		en += self.applied_energy(t, n, q, T, applied_args, eta)
+		en += self._elastic_energy(t, n, q, l, k, network)
+		en += self._applied_energy(t, n, q, T, applied_args, eta)
 		return en
 
-	def applied_energy(self, t, n, q, _q, T, applied_args, eta):
-		'''Contribution to total energy from applied forces. Problem specific and implemented
-		by subclass.'''
+	def _applied_energy(self, t, n, q, _q, T, applied_args, eta):
 		raise NotImplementedError
 
-	def ff(self, t, q, *args):
+	def _ff(self, t, q, *args):
 		'''Compute the derivative of the degrees of freedom of the spring network to integrate.
 		
 		Parameters
 		----------
 		t : float
 			The current time.
-		q : float array
+		q : ndarray
 			The degrees of freedom.
 		args : tuple
 			Collection of simulation arguments:
 			
 				* T: Period for oscillatory force. If T = 0, nodes with an applied force are held stationary.
-				* network: Network edge properties obtained from edge_lists().
+				* network: Network edge properties obtained from _edge_lists().
 				* applied_args: Simulation arguments, which can vary by problem.
 				* train: The type of training to perform. If train = 0 (default), no training is done. If train = 1,
 				train lengths using method 'aging' or 'learning'. If train = 2, train stiffnesses using
@@ -360,7 +388,7 @@ class Elastic:
 
 		Returns
 		-------
-		fun : float array, shape (len(q),)
+		fun : ndarray, shape (len(q),)
 			Derivative of the degrees of freedom.
 		'''
 		T, network, applied_args, train, method, eta, alpha, pbar = args
@@ -379,31 +407,31 @@ class Elastic:
 				k = edge_k
 				dl = fun[8*n:]
 
-				if method == 'learning': self.length_update_learning(t, n, q, _q, l, dl, eta, alpha, network)
-				else: self.length_update_aging(t, n, q, _q, l, dl, eta, alpha, network)
+				if method == 'learning': self._length_update_learning(t, n, q, _q, l, dl, eta, alpha, network)
+				else: self._length_update_aging(t, n, q, _q, l, dl, eta, alpha, network)
 				
 			elif train == 2:
 				l = edge_l
 				k = q[8*n:]
 				dk = fun[8*n:]
 
-				if method == 'learning': self.stiffness_update_learning(t, n, q, _q, k, dk, eta, alpha, network)
-				else: self.stiffness_update_aging(t, n, q, _q, k, dk, eta, alpha, network)
+				if method == 'learning': self._stiffness_update_learning(t, n, q, _q, k, dk, eta, alpha, network)
+				else: self._stiffness_update_aging(t, n, q, _q, k, dk, eta, alpha, network)
 		else:
 			l = edge_l
 			k = edge_k
 		
 		# free state
-		self.drag_force(t, n, q, fun, network, self.params['drag'])
-		self.dashpot_force(t, n, q, l, acc, network, self.params['dashpot'])
-		self.elastic_force(t, n, q, l, k, acc, network)
+		self._drag_force(t, n, q, fun, network, self.params['drag'])
+		self._dashpot_force(t, n, q, l, acc, network, self.params['dashpot'])
+		self._elastic_force(t, n, q, l, k, acc, network)
 
 		# clamped state
-		self.drag_force(t, n, _q, _fun, network, self.params['drag'])
-		self.dashpot_force(t, n, _q, l, _acc, network, self.params['dashpot'])
-		self.elastic_force(t, n, _q, l, k, _acc, network)
+		self._drag_force(t, n, _q, _fun, network, self.params['drag'])
+		self._dashpot_force(t, n, _q, l, _acc, network, self.params['dashpot'])
+		self._elastic_force(t, n, _q, l, k, _acc, network)
 
-		self.applied_force(t, n, q, _q, acc, _acc, T, applied_args, eta)
+		self._applied_force(t, n, q, _q, acc, _acc, T, applied_args, eta)
 
 		# update progress bar
 		if pbar:
@@ -413,7 +441,7 @@ class Elastic:
 
 		return fun
 
-	def jj(self, t, q, *args):
+	def _jj(self, t, q, *args):
 		'''Compute the jacobian of the derivative of the degrees of freedom of the spring network.
 			Only needed by implicit integrators, which are used when train = 0.
 		
@@ -421,13 +449,13 @@ class Elastic:
 		----------
 		t : float
 			The current time.
-		q : float array
+		q : ndarray
 			The degrees of freedom.
 		args : tuple
 			Collection of simulation arguments:
 			
 				* T: Period for oscillatory force. If T = 0, nodes with an applied force are held stationary.
-				* network: Network edge properties obtained from edge_lists().
+				* network: Network edge properties obtained from _edge_lists().
 				* applied_args: Simulation arguments, which can vary by problem.
 				* train: The type of training to perform. If train = 0 (default), no training is done. If train = 1,
 				train lengths using method 'aging' or 'learning'. If train = 2, train stiffnesses using
@@ -441,7 +469,7 @@ class Elastic:
 
 		Returns
 		-------
-		jac : float array, shape (len(q), len(q))
+		jac : ndarray, shape (len(q), len(q))
 			Jacobian of the derivative.
 		'''
 		T, network, applied_args, train, method, eta, alpha, pbar = args
@@ -462,31 +490,28 @@ class Elastic:
 		k = edge_k
 
 		# free state
-		self.drag_jacobian(t, n, q, dfdv, network, self.params['drag'])
-		self.dashpot_jacobian(t, n, q, l, dfdx, dfdv, network, self.params['dashpot'])
-		self.elastic_jacobian(t, n, q, l, k, dfdx, network)
+		self._drag_jacobian(t, n, q, dfdv, network, self.params['drag'])
+		self._dashpot_jacobian(t, n, q, l, dfdx, dfdv, network, self.params['dashpot'])
+		self._elastic_jacobian(t, n, q, l, k, dfdx, network)
 
 		# clamped state
-		self.drag_jacobian(t, n, _q, _dfdv, network, self.params['drag'])
-		self.dashpot_jacobian(t, n, _q, l, _dfdx, _dfdv, network, self.params['dashpot'])
-		self.elastic_jacobian(t, n, _q, l, k, _dfdx, network)
+		self._drag_jacobian(t, n, _q, _dfdv, network, self.params['drag'])
+		self._dashpot_jacobian(t, n, _q, l, _dfdx, _dfdv, network, self.params['dashpot'])
+		self._elastic_jacobian(t, n, _q, l, k, _dfdx, network)
 
-		self.applied_jacobian(t, n, q, _q, dfdx, _dfdx, T, applied_args, eta)
+		self._applied_jacobian(t, n, q, _q, dfdx, _dfdx, T, applied_args, eta)
 
 		return jac
 
-	def applied_force(self, t, n, q, _q, acc, _acc, T, applied_args, eta):
-		'''Applied forces on the elastic network. Problem specific and implemented by subclass.'''
+	def _applied_force(self, t, n, q, _q, acc, _acc, T, applied_args, eta):
 		raise NotImplementedError
 
-	def applied_jacobian(self, t, n, q, _q, dfdx, _dfdx, T, applied_args, eta):
-		'''Jacobian of applied forces on the elastic network. Problem specific and implemented
-		by subclass.'''
+	def _applied_jacobian(self, t, n, q, _q, dfdx, _dfdx, T, applied_args, eta):
 		raise NotImplementedError
 
 	@staticmethod
 	@jit(nopython=True)
-	def drag_force(t, n, q, fun, network, b):
+	def _drag_force(t, n, q, fun, network, b):
 		'''Apply isotropic drag force on each node.
 
 		Parameters
@@ -495,12 +520,12 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : float array, shape (4*n,)
+		q : ndarray, shape (4*n,)
 			The positions and velocities of nodes in the system.
-		fun : float array, shape (4*n,)
+		fun : ndarray, shape (4*n,)
 			Derivative array in which to store velocities and drag forces.
 		network : tuple of arrays
-			Network edge properties obtained from edge_lists().
+			Network edge properties obtained from _edge_lists().
 		b : float
 			The drag coefficient.
 		'''
@@ -515,7 +540,7 @@ class Elastic:
 
 	@staticmethod
 	@jit(nopython=True)
-	def drag_jacobian(t, n, q, jac, network, b):
+	def _drag_jacobian(t, n, q, jac, network, b):
 		'''Compute the jacobian of the isotropic drag force on each node.
 
 		Parameters
@@ -524,12 +549,12 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : float array, shape (4*n,)
+		q : ndarray, shape (4*n,)
 			The positions and velocities of nodes in the system.
-		jac : float array, shape (2*n,2*n)
+		jac : ndarray, shape (2*n, 2*n)
 			Subblock of jacobian in which to store derivative of drag force.
 		network : tuple of arrays
-			Network edge properties obtained from edge_lists().
+			Network edge properties obtained from _edge_lists().
 		b : float
 			The drag coefficient.
 		'''
@@ -538,7 +563,7 @@ class Elastic:
 
 	@staticmethod
 	@jit(nopython=True)
-	def elastic_energy(t, n, q, l, k, network):
+	def _elastic_energy(t, n, q, l, k, network):
 		'''Compute the energy contribution due to pairwise interactions of bonded nodes.
 
 		Parameters
@@ -547,16 +572,16 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : float array, shape (2*n,)
+		q : ndarray, shape (2*n,)
 			The positions of the nodes.
-		l : float array, shape (ne,)
+		l : ndarray, shape (ne,)
 			The rest length of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		k : float array, shape (ne,)
+		k : ndarray, shape (ne,)
 			The stiffness of each bond. Different from network lists if it is a
 			learning degree of freedom.
 		network : tuple of arrays
-			Network edge properties obtained from edge_lists().
+			Network edge properties obtained from _edge_lists().
 
 		Returns
 		-------
@@ -575,7 +600,7 @@ class Elastic:
 
 	@staticmethod
 	@jit(nopython=True)
-	def elastic_force(t, n, q, l, k, acc, network):
+	def _elastic_force(t, n, q, l, k, acc, network):
 		'''Apply elastic forces between bonded nodes.
 
 		Parameters
@@ -584,18 +609,18 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : float array, shape (2*n,)
+		q : ndarray, shape (2*n,)
 			The positions of the nodes.
-		l : float array, shape (ne,)
+		l : ndarray, shape (ne,)
 			The rest length of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		k : float array, shape (ne,)
+		k : ndarray, shape (ne,)
 			The stiffness of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		acc : float array, shape (2*n,)
+		acc : ndarray, shape (2*n,)
 			The acceleration of each node, populated as output.
 		network : tuple of arrays
-			Network edge properties obtained from edge_lists().
+			Network edge properties obtained from _edge_lists().
 		'''
 		edge_i, edge_j, edge_k, edge_l, edge_t = network
 		for e,(i, j) in enumerate(zip(edge_i, edge_j)):
@@ -611,7 +636,7 @@ class Elastic:
 
 	@staticmethod
 	@jit(nopython=True)
-	def elastic_jacobian(t, n, q, l, k, jac, network):
+	def _elastic_jacobian(t, n, q, l, k, jac, network):
 		'''Compute the jacobian of elastic forces between bonded nodes.
 
 		Parameters
@@ -620,18 +645,18 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : float array, shape (2*n,)
+		q : ndarray, shape (2*n,)
 			The positions of the nodes.
-		l : float array, shape (ne,)
+		l : ndarray, shape (ne,)
 			The rest length of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		k : float array, shape (ne,)
+		k : ndarray, shape (ne,)
 			The stiffness of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		jac : float array, shape (2*n,2*n)
+		jac :ndarray, shape (2*n, 2*n)
 			The jacobian of elastic forces, populated as output.
 		network : tuple of arrays
-			Network edge properties obtained from edge_lists().
+			Network edge properties obtained from _edge_lists().
 		'''
 		edge_i, edge_j, edge_k, edge_l, edge_t = network
 		for e,(i, j) in enumerate(zip(edge_i, edge_j)):
@@ -665,7 +690,7 @@ class Elastic:
 
 	@staticmethod
 	@jit(nopython=True)
-	def dashpot_force(t, n, q, l, acc, network, b):
+	def _dashpot_force(t, n, q, l, acc, network, b):
 		'''Apply dashpot forces between bonded nodes.
 
 		Parameters
@@ -674,18 +699,18 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : float array, shape (2*n,)
+		q : ndarray, shape (2*n,)
 			The positions of the nodes.
-		l : float array, shape (ne,)
+		l : ndarray, shape (ne,)
 			The rest length of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		k : float array, shape (ne,)
+		k : ndarray, shape (ne,)
 			The stiffness of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		acc : float array, shape (2*n,)
+		acc : ndarray, shape (2*n,)
 			The acceleration of each node, populated as output.
 		network : tuple of arrays
-			Network edge properties obtained from edge_lists().
+			Network edge properties obtained from _edge_lists().
 		b : float
 			The dashpot damping coefficient.
 		'''
@@ -708,7 +733,7 @@ class Elastic:
 
 	@staticmethod
 	@jit(nopython=True)
-	def dashpot_jacobian(t, n, q, l, jacx, jacv, network, b):
+	def _dashpot_jacobian(t, n, q, l, jacx, jacv, network, b):
 		'''Compute the jacobian of dashpot forces between bonded nodes.
 
 		Parameters
@@ -717,18 +742,20 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : float array, shape (2*n,)
+		q : ndarray, shape (2*n,)
 			The positions of the nodes.
-		l : float array, shape (ne,)
+		l : ndarray, shape (ne,)
 			The rest length of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		k : float array, shape (ne,)
+		k : ndarray, shape (ne,)
 			The stiffness of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		jacx, jacv : float arrays, shape (2*n,2*n)
-			The jacobian subblocks to populate.
+		jacx : ndarray, shape (2*n, 2*n)
+			The jacobian subblock to populate.
+		jacv : ndarray, shape (2*n, 2*n)
+			The jacobian subblock to populate.
 		network : tuple of arrays
-			Network edge properties obtained from edge_lists().
+			Network edge properties obtained from _edge_lists().
 		b : float
 			The dashpot damping coefficient.
 		'''
@@ -793,7 +820,7 @@ class Elastic:
 
 	@staticmethod
 	@jit(nopython=True)
-	def length_update_learning(t, n, q, _q, l, dl, eta, alpha, network):
+	def _length_update_learning(t, n, q, _q, l, dl, eta, alpha, network):
 		'''Apply an update to edge rest lengths using coupled learning.
 		
 		Parameters
@@ -802,20 +829,20 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : float array, shape (2*n,)
+		q : ndarray, shape (2*n,)
 			The positions of the nodes in the free state.
-		_q : float array, shape (2*n,)
+		_q : ndarray, shape (2*n,)
 			The positions of the nodes in the clamped state.
-		l : float array, shape (ne,)
+		l : ndarray, shape (ne,)
 			The rest length of each bond.
-		dl : float array, shape (ne,)
+		dl : ndarray, shape (ne,)
 			The derivative of the rest lengths with time, populated on output.
 		eta : float
 			The learning rate.
 		alpha : float
 			The aging rate.
 		network : tuple of arrays
-			Network edge properties obtained from edge_lists().
+			Network edge properties obtained from _edge_lists().
 		'''
 		edge_i, edge_j, edge_k, edge_l, edge_t = network
 		for e, (i, j, k, train) in enumerate(zip(edge_i, edge_j, edge_k, edge_t)):
@@ -839,7 +866,7 @@ class Elastic:
 
 	@staticmethod
 	@jit(nopython=True)
-	def length_update_aging(t, n, q, _q, l, dl, eta, alpha, network):
+	def _length_update_aging(t, n, q, _q, l, dl, eta, alpha, network):
 		'''Apply an update to edge rest lengths using directed aging.
 		
 		Parameters
@@ -848,20 +875,20 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : float array, shape (2*n,)
+		q : ndarray, shape (2*n,)
 			The positions of the nodes in the free state.
-		_q : float array, shape (2*n,)
+		_q : ndarray, shape (2*n,)
 			The positions of the nodes in the clamped state.
-		l : float array, shape (ne,)
+		l : ndaarray, shape (ne,)
 			The rest length of each bond.
-		dl : float array, shape (ne,)
+		dl : ndarray, shape (ne,)
 			The derivative of the rest lengths with time, populated on output.
 		eta : float
 			The learning rate.
 		alpha : float
 			The aging rate.
 		network : tuple of arrays
-			Network edge properties obtained from edge_lists().
+			Network edge properties obtained from _edge_lists().
 		'''
 		edge_i, edge_j, edge_k, edge_l, edge_t = network
 		for e, (i, j, k, train) in enumerate(zip(edge_i, edge_j, edge_k, edge_t)):
@@ -878,7 +905,7 @@ class Elastic:
 
 	@staticmethod
 	@jit(nopython=True)
-	def stiffness_update_learning(t, n, q, _q, k, dk, eta, alpha, network):
+	def _stiffness_update_learning(t, n, q, _q, k, dk, eta, alpha, network):
 		'''Apply an update to edge stiffnesses using coupled learning.
 		
 		Parameters
@@ -887,20 +914,20 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : float array, shape (2*n,)
+		q : ndarray, shape (2*n,)
 			The positions of the nodes in the free state.
-		_q : float array, shape (2*n,)
+		_q : ndarray, shape (2*n,)
 			The positions of the nodes in the clamped state.
-		k : float array, shape (ne,)
+		k : ndarray, shape (ne,)
 			The stiffness of each bond.
-		dk : float array, shape (ne,)
+		dk : ndarray, shape (ne,)
 			The derivative of the stiffnesses with time, populated on output.
 		eta : float
 			The learning rate.
 		alpha : float
 			The aging rate.
-		network : tuple of arrays
-			Network edge properties obtained from edge_lists().
+		network : tuple of ndarrays
+			Network edge properties obtained from _edge_lists().
 		'''
 		edge_i, edge_j, edge_k, edge_l, edge_t = network
 		for e, (i, j, l, train) in enumerate(zip(edge_i, edge_j, edge_l, edge_t)):
@@ -924,7 +951,7 @@ class Elastic:
 
 	@staticmethod
 	@jit(nopython=True)
-	def stiffness_update_aging(t, n, q, _q, k, dk, eta, alpha, network):
+	def _stiffness_update_aging(t, n, q, _q, k, dk, eta, alpha, network):
 		'''Apply an update to edge stiffnesses using directed aging.
 		
 		Parameters
@@ -933,20 +960,20 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : float array, shape (2*n,)
+		q : ndarray, shape (2*n,)
 			The positions of the nodes in the free state.
-		_q : float array, shape (2*n,)
+		_q : ndarray, shape (2*n,)
 			The positions of the nodes in the clamped state.
-		k : float array, shape (ne,)
+		k : ndarray, shape (ne,)
 			The stiffness of each bond.
-		dk : float array, shape (ne,)
+		dk : ndarray, shape (ne,)
 			The derivative of the stiffnesses with time, populated on output.
 		eta : float
 			The learning rate.
 		alpha : float
 			The aging rate.
-		network : tuple of arrays
-			Network edge properties obtained from edge_lists().
+		network : tuple of ndarrays
+			Network edge properties obtained from _edge_lists().
 		'''
 		edge_i, edge_j, edge_k, edge_l, edge_t = network
 		for e, (i, j, l, train) in enumerate(zip(edge_i, edge_j, edge_l, edge_t)):
@@ -962,7 +989,7 @@ class Elastic:
 				else:
 					k[e] = dk[e] = 0.
 
-	def sine_pulse(self, t, T):
+	def _sine_pulse(self, t, T):
 		'''A sine pulse in time.
 
 		Parameters
@@ -979,7 +1006,7 @@ class Elastic:
 		'''
 		return np.sin(2*np.pi*t/T)
 
-	def cosine_pulse(self, t, T):
+	def _cosine_pulse(self, t, T):
 		'''A cosine pulse in time.
 
 		Parameters
@@ -996,7 +1023,7 @@ class Elastic:
 		'''
 		return np.cos(2*np.pi*t/T)
 
-	def ramp(self, t, T):
+	def _ramp(self, t, T):
 		'''A smooth ramp function in time.
 
 		Parameters
@@ -1030,9 +1057,9 @@ class Elastic:
 
 		Returns
 		-------
-		evals : float array, shape (2*n,)
+		evals : ndarray, shape (2*n,)
 			Array of eigenvalues.
-		evecs : float array, shape (2*n,2*n)
+		evecs : ndarray, shape (2*n, 2*n)
 			Array of unit eigenvectors, with each column corresponding to a different
 			eigenvector.
 		'''
@@ -1045,10 +1072,10 @@ class Elastic:
 		mask[::2] = self.degree > 0
 		mask[1::2] = self.degree > 0
 
-		edge_i, edge_j, edge_k, edge_l, edge_t = self.edge_lists()
+		edge_i, edge_j, edge_k, edge_l, edge_t = self.__edge_lists()
 		network = (edge_i, edge_j, edge_k, edge_l, edge_t)
 
-		self.elastic_jacobian(t, self.n, q, edge_l, edge_k, hess, network)
+		self._elastic_jacobian(t, self.n, q, edge_l, edge_k, hess, network)
 
 		hess = hess[mask]
 		hess = hess.T[mask].T
@@ -1057,11 +1084,11 @@ class Elastic:
 		return evals, evecs
 
 	def rigid_correction(self):
-		'''Find the nearest procrustes transformation (translation + rotation) to the first frame.
+		'''Find the nearest Procrustes transformation (translation + rotation) to the first frame.
 
 		Returns
 		-------
-		traj : float array, shape (frames+1,n,2)
+		traj : ndarray, shape (frames+1, n, 2)
 			The particles' trajectories corrected for rigid translation and rotation.
 		'''
 		b = self.traj[0] - np.mean(self.traj[0], axis=0)
@@ -1129,7 +1156,7 @@ class Elastic:
 
 		Parameters
 		----------
-		ax : matplotlib axes object
+		ax : matplotlib.axes.Axes object
 			The axes to set up.
 		'''
 		lim = 1.1*np.max(np.abs(self.pts))
@@ -1137,12 +1164,12 @@ class Elastic:
 		ax.set_ylim(-lim,lim)
 		ax.axis('off')
 
-	def collect_edges(self):
+	def _collect_edges(self):
 		'''Prepare edges for matplotlib collections plotting.
 		
 		Returns
 		-------
-		edges : float array, shape (ne,2,2)
+		edges : ndarray, shape (ne, 2, 2)
 			Array storing the endpoints of each edge.
 		'''
 		edges = np.zeros((len(self.graph.edges()),2,2))
@@ -1156,15 +1183,18 @@ class Elastic:
 
 		Parameters
 		----------
-		ax : matplotlib axes object
+		ax : matplotlib.axes.Axes object
 			The axes on which to plot.
 
 		Returns
 		-------
-		ec, dc : matplotlib LineCollection and EllipseCollection objects, respectively
-			Handles to the plotted edges and disks.
+		ec : matplotlib.collections.LineCollection object
+			Handle to the plotted edges.
+
+		dc : matplotlib.collections.EllipseCollection object
+			Handle to the plotted nodes.
 		'''
-		e = self.collect_edges()
+		e = self._collect_edges()
 		ec = mc.LineCollection(e, colors='k', linewidths=1)
 		ax.add_collection(ec)
 
