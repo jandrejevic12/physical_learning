@@ -178,7 +178,7 @@ class Elastic:
 		'''Numerically integrate the elastic network in time.
 
 		This routine ptionally trains edge stiffnesses or rest lengths using directed aging or
-		coupled learning. Upon completion, an output trajectory of shape (frames+1, n, 2) is stored
+		coupled learning. Upon completion, an output trajectory of frames+1 snapshots is stored
 		in the attribute 'traj', and corresponding times in 't_eval'.
 		
 		Parameters
@@ -307,12 +307,12 @@ class Elastic:
 			- network: Network edge properties obtained from _edge_lists().
 			- applied_args: Simulation arguments, which can vary by problem.
 			- train: The type of training to perform. If train = 0 (default), no training is done. If train = 1,
-			train lengths using method 'aging' or 'learning'. If train = 2, train stiffnesses using
-			method 'aging' or 'learning'.
+			  train lengths using method 'aging' or 'learning'. If train = 2, train stiffnesses using
+			  method 'aging' or 'learning'.
 			- method: Used only if train is nonzero. Specifies the type of training approach to use. Default is
-			'learning'.
+			  'learning'.
 			- eta: Learning rate by which to increment applied strain towards the target. Default is 1, which
-			corresponds to pinning directly at the target.
+			  corresponds to pinning directly at the target.
 			- alpha: Aging rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
 			- pbar: Whether to display a progress bar. Default is True. 
 
@@ -360,18 +360,18 @@ class Elastic:
 			- network: Network edge properties obtained from _edge_lists().
 			- applied_args: Simulation arguments, which can vary by problem.
 			- train: The type of training to perform. If train = 0 (default), no training is done. If train = 1,
-			train lengths using method 'aging' or 'learning'. If train = 2, train stiffnesses using
-			method 'aging' or 'learning'.
+			  train lengths using method 'aging' or 'learning'. If train = 2, train stiffnesses using
+			  method 'aging' or 'learning'.
 			- method: Used only if train is nonzero. Specifies the type of training approach to use. Default is
-			'learning'.
+			  'learning'.
 			- eta: Learning rate by which to increment applied strain towards the target. Default is 1, which
-			corresponds to pinning directly at the target.
+			  corresponds to pinning directly at the target.
 			- alpha: Aging rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
 			- pbar: Whether to display a progress bar. Default is True. 
 
 		Returns
 		-------
-		|ndarray|, shape (len(q),)
+		|ndarray|
 			Derivative of the degrees of freedom.
 		'''
 
@@ -443,18 +443,18 @@ class Elastic:
 			- network: Network edge properties obtained from _edge_lists().
 			- applied_args: Simulation arguments, which can vary by problem.
 			- train: The type of training to perform. If train = 0 (default), no training is done. If train = 1,
-			train lengths using method 'aging' or 'learning'. If train = 2, train stiffnesses using
-			method 'aging' or 'learning'.
+			  train lengths using method 'aging' or 'learning'. If train = 2, train stiffnesses using
+			  method 'aging' or 'learning'.
 			- method: Used only if train is nonzero. Specifies the type of training approach to use. Default is
-			'learning'.
+			  'learning'.
 			- eta: Learning rate by which to increment applied strain towards the target. Default is 1, which
-			corresponds to pinning directly at the target.
+			  corresponds to pinning directly at the target.
 			- alpha: Aging rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
 			- pbar: Whether to display a progress bar. Default is True. 
 
 		Returns
 		-------
-		|ndarray|, shape (len(q), len(q))
+		|ndarray|
 			Jacobian of the derivative.
 		'''
 
@@ -506,9 +506,9 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : |ndarray|, shape (4*n,)
+		q : |ndarray|
 			The positions and velocities of nodes in the system.
-		fun : |ndarray|, shape (4*n,)
+		fun : |ndarray|
 			Derivative array in which to store velocities and drag forces.
 		network : tuple of |ndarrays|
 			Network edge properties obtained from _edge_lists().
@@ -536,9 +536,9 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : |ndarray|, shape (4*n,)
+		q : |ndarray|
 			The positions and velocities of nodes in the system.
-		jac : |ndarray|, shape (2*n, 2*n)
+		jac : |ndarray|
 			Subblock of jacobian in which to store derivative of drag force.
 		network : tuple of |ndarrays|
 			Network edge properties obtained from _edge_lists().
@@ -560,12 +560,12 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : |ndarray|, shape (2*n,)
+		q : |ndarray|
 			The positions of the nodes.
-		l : |ndarray|, shape (ne,)
+		l : |ndarray|
 			The rest length of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		k : |ndarray|, shape (ne,)
+		k : |ndarray|
 			The stiffness of each bond. Different from network lists if it is a
 			learning degree of freedom.
 		network : tuple of |ndarrays|
@@ -598,15 +598,15 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : |ndarray|, shape (2*n,)
+		q : |ndarray|
 			The positions of the nodes.
-		l : |ndarray|, shape (ne,)
+		l : |ndarray|
 			The rest length of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		k : |ndarray|, shape (ne,)
+		k : |ndarray|
 			The stiffness of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		acc : |ndarray|, shape (2*n,)
+		acc : |ndarray|
 			The acceleration of each node, populated as output.
 		network : tuple of |ndarrays|
 			Network edge properties obtained from _edge_lists().
@@ -635,15 +635,15 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : |ndarray|, shape (2*n,)
+		q : |ndarray|
 			The positions of the nodes.
-		l : |ndarray|, shape (ne,)
+		l : |ndarray|
 			The rest length of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		k : |ndarray|, shape (ne,)
+		k : |ndarray|
 			The stiffness of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		jac :|ndarray|, shape (2*n, 2*n)
+		jac :|ndarray|
 			The jacobian of elastic forces, populated as output.
 		network : tuple of |ndarrays|
 			Network edge properties obtained from _edge_lists().
@@ -690,15 +690,15 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : |ndarray|, shape (2*n,)
+		q : |ndarray|
 			The positions of the nodes.
-		l : |ndarray|, shape (ne,)
+		l : |ndarray|
 			The rest length of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		k : |ndarray|, shape (ne,)
+		k : |ndarray|
 			The stiffness of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		acc : |ndarray|, shape (2*n,)
+		acc : |ndarray|
 			The acceleration of each node, populated as output.
 		network : tuple of |ndarrays|
 			Network edge properties obtained from _edge_lists().
@@ -734,17 +734,17 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : |ndarray|, shape (2*n,)
+		q : |ndarray|
 			The positions of the nodes.
-		l : |ndarray|, shape (ne,)
+		l : |ndarray|
 			The rest length of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		k : |ndarray|, shape (ne,)
+		k : |ndarray|
 			The stiffness of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		jacx : |ndarray|, shape (2*n, 2*n)
+		jacx : |ndarray|
 			The jacobian subblock to populate.
-		jacv : |ndarray|, shape (2*n, 2*n)
+		jacv : |ndarray|
 			The jacobian subblock to populate.
 		network : tuple of |ndarrays|
 			Network edge properties obtained from _edge_lists().
@@ -822,13 +822,13 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : |ndarray|, shape (2*n,)
+		q : |ndarray|
 			The positions of the nodes in the free state.
-		_q : |ndarray|, shape (2*n,)
+		_q : |ndarray|
 			The positions of the nodes in the clamped state.
-		l : |ndarray|, shape (ne,)
+		l : |ndarray|
 			The rest length of each bond.
-		dl : |ndarray|, shape (ne,)
+		dl : |ndarray|
 			The derivative of the rest lengths with time, populated on output.
 		eta : float
 			The learning rate.
@@ -869,13 +869,13 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : |ndarray|, shape (2*n,)
+		q : |ndarray|
 			The positions of the nodes in the free state.
-		_q : |ndarray|, shape (2*n,)
+		_q : |ndarray|
 			The positions of the nodes in the clamped state.
-		l : ndaarray, shape (ne,)
+		l : |ndarray|
 			The rest length of each bond.
-		dl : |ndarray|, shape (ne,)
+		dl : |ndarray|
 			The derivative of the rest lengths with time, populated on output.
 		eta : float
 			The learning rate.
@@ -909,13 +909,13 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : |ndarray|, shape (2*n,)
+		q : |ndarray|
 			The positions of the nodes in the free state.
-		_q : |ndarray|, shape (2*n,)
+		_q : |ndarray|
 			The positions of the nodes in the clamped state.
-		k : |ndarray|, shape (ne,)
+		k : |ndarray|
 			The stiffness of each bond.
-		dk : |ndarray|, shape (ne,)
+		dk : |ndarray|
 			The derivative of the stiffnesses with time, populated on output.
 		eta : float
 			The learning rate.
@@ -956,13 +956,13 @@ class Elastic:
 			The current time.
 		n : int
 			The number of nodes.
-		q : |ndarray|, shape (2*n,)
+		q : |ndarray|
 			The positions of the nodes in the free state.
-		_q : |ndarray|, shape (2*n,)
+		_q : |ndarray|
 			The positions of the nodes in the clamped state.
-		k : |ndarray|, shape (ne,)
+		k : |ndarray|
 			The stiffness of each bond.
-		dk : |ndarray|, shape (ne,)
+		dk : |ndarray|
 			The derivative of the stiffnesses with time, populated on output.
 		eta : float
 			The learning rate.
@@ -1057,9 +1057,9 @@ class Elastic:
 
 		Returns
 		-------
-		evals : |ndarray|, shape (2*n,)
+		evals : |ndarray|
 			Array of eigenvalues.
-		evecs : |ndarray|, shape (2*n, 2*n)
+		evecs : |ndarray|
 			Array of unit eigenvectors, with each column corresponding to a different
 			eigenvector.
 		'''
@@ -1089,7 +1089,7 @@ class Elastic:
 
 		Returns
 		-------
-		|ndarray|, shape (frames+1, n, 2)
+		|ndarray|
 			The particles' trajectories corrected for rigid translation and rotation.
 		'''
 
@@ -1161,7 +1161,7 @@ class Elastic:
 
 		Parameters
 		----------
-		ax : matplotlib.axes.Axes
+		ax : |matplotlib.axes.Axes|
 			The axes to set up.
 		'''
 
@@ -1175,7 +1175,7 @@ class Elastic:
 		
 		Returns
 		-------
-		|ndarray|, shape (ne, 2, 2)
+		|ndarray|
 			Array storing the endpoints of each edge.
 		'''
 
@@ -1190,15 +1190,15 @@ class Elastic:
 
 		Parameters
 		----------
-		ax : matplotlib.axes.Axes
+		ax : |matplotlib.axes.Axes|
 			The axes on which to plot.
 
 		Returns
 		-------
-		ec : matplotlib.collections.LineCollection
+		ec : |matplotlib.collections.LineCollection|
 			Handle to the plotted edges.
 
-		dc : matplotlib.collections.EllipseCollection
+		dc : |matplotlib.collections.EllipseCollection|
 			Handle to the plotted nodes.
 		'''
 
