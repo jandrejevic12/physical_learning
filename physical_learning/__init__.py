@@ -1,1 +1,2 @@
-from elastic_utils import *
+from .elastic_utils import Elastic
+__all__ = ('Elastic')
