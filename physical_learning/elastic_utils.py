@@ -28,6 +28,34 @@ class Elastic:
 			* 'drag': coefficient of isotropic drag
 			* 'dashpot': coefficient of dashpot damping at each edge
 			* 'stiffness': initial stiffness assigned to each edge spring
+
+	Attributes
+	----------
+	graph : networkx graph object
+		Graph specifying the nodes and edges in the network. A stiffness, rest length,
+		and "trainable" parameter are associated with each edge. A trainable edge means
+		it will be updated during training.
+	seed : int
+		A random seed used for selecting sources and targets at random.
+	n : int
+		Number of nodes in the network.
+	ne : int
+		Number of edges in the network.
+    pts : ndarray, shape (n,2)
+		(x,y) coordinates for each node in the system.
+	degree : ndarray, shape (n,)
+		The degree (number of neighbors) of each node.
+	Z : float
+		The average coordination number, defined as 2*ne/nc, where nc is the number of nodes in the
+		biggest connected component of the system.
+	dZ : float
+		The excess coordination, defined as Z - Ziso, where Ziso is the average coordination required
+		for isostaticity (Ziso = 4 - 6/nc in 2D).
+	traj : ndarray, shape (frames+1, n, 2)
+		The simulated trajectory of the network produced after a call to the solve() routine. Frames is
+		the number of output frames specified for solve, plus one for the initial condition.
+	t_eval : ndarray, shape (frames+1,)
+		The corresponding time at each simulated frame.
 	'''
 
 	def __init__(self, graph, params={'rfac':0.05, 'drag':0.005, 'dashpot':10., 'stiffness':1.}):
@@ -164,7 +192,7 @@ class Elastic:
 
 		Returns
 		-------
-		d : float or ndarray
+		float or ndarray
 			The distance between the two points.
 		'''
 
@@ -324,7 +352,7 @@ class Elastic:
 
 		Returns
 		-------
-		en : float
+		float
 			Total energy of the network.
 		'''
 
@@ -377,7 +405,7 @@ class Elastic:
 
 		Returns
 		-------
-		fun : ndarray, shape (len(q),)
+		ndarray, shape (len(q),)
 			Derivative of the degrees of freedom.
 		'''
 
@@ -460,7 +488,7 @@ class Elastic:
 
 		Returns
 		-------
-		jac : ndarray, shape (len(q), len(q))
+		ndarray, shape (len(q), len(q))
 			Jacobian of the derivative.
 		'''
 
@@ -579,7 +607,7 @@ class Elastic:
 
 		Returns
 		-------
-		en : float
+		float
 			Contribution to total energy due to elastic bonds.
 		'''
 
@@ -1004,7 +1032,7 @@ class Elastic:
 
 		Returns
 		-------
-		p : float
+		float
 			The value of the sine pulse at the current time.
 		'''
 
@@ -1022,7 +1050,7 @@ class Elastic:
 
 		Returns
 		-------
-		p : float
+		float
 			The value of the cosine pulse at the current time.
 		'''
 
@@ -1040,7 +1068,7 @@ class Elastic:
 
 		Returns
 		-------
-		p : float
+		float
 			The value of the ramp function at the current time.
 		'''
 
@@ -1095,7 +1123,7 @@ class Elastic:
 
 		Returns
 		-------
-		traj : ndarray, shape (frames+1, n, 2)
+		ndarray, shape (frames+1, n, 2)
 			The particles' trajectories corrected for rigid translation and rotation.
 		'''
 
@@ -1122,7 +1150,7 @@ class Elastic:
 
 		Returns
 		-------
-		l_ms : float
+		float
 			The mean square displacement.
 		'''
 
@@ -1181,7 +1209,7 @@ class Elastic:
 		
 		Returns
 		-------
-		edges : ndarray, shape (ne, 2, 2)
+		ndarray, shape (ne, 2, 2)
 			Array storing the endpoints of each edge.
 		'''
 
