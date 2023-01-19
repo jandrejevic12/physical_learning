@@ -1058,10 +1058,9 @@ class Elastic:
 		Returns
 		-------
 		evals : |ndarray|
-			Array of eigenvalues.
+			Eigenvalues.
 		evecs : |ndarray|
-			Array of unit eigenvectors, with each column corresponding to a different
-			eigenvector.
+			Unit eigenvectors stored in each column.
 		'''
 
 		self.reset_init()
