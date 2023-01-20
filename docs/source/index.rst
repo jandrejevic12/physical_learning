@@ -1,5 +1,5 @@
-Documentation for the Physical Learning Repository
-==================================================
+Physical Learning with Elastic Networks
+=======================================
 
 .. note::
 
