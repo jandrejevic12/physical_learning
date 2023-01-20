@@ -129,6 +129,6 @@ def load_run(odir):
 	data, cols = read_log(logfile)
 	allo.t_eval = data[:,cols.index('Time')]
 	contents = read_dump(dumpfile)
-	if len(contents) == allo.n: allo.traj = np.copy(contents)
+	if contents.shape[1] == allo.n: allo.traj = np.copy(contents)
 	else: allo.traj = np.copy(contents[1::2])
 	return allo, data, cols
