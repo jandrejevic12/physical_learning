@@ -1,2 +1,4 @@
 from .elastic_utils import Elastic
-__all__ = ('Elastic')
+from .allosteric_utils import Allosteric
+
+__all__ = ['Elastic', 'Allosteric']
