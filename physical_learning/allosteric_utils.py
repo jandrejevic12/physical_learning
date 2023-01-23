@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 from matplotlib import collections  as mc
 import matplotlib.animation as animation
 
+from scipy.spatial import Voronoi, voronoi_plot_2d, Delaunay
+
 import networkx as nx
 
 class Allosteric(Elastic):
@@ -181,36 +183,121 @@ class Allosteric(Elastic):
 	def _auto_source_target(self):
 		'''Select a pair of source and target nodes at random.
 
-		If any two connected nodes are selected, the edge between them is removed.
+		The source and target will be chosen from unbonded neighboring nodes along
+		the edge. If the routine fails to find suitable options, it will revert to
+		manual selection.
 		'''
 
-		np.random.seed(self.seed)
-		edges = list(self.graph.edges())
-		degi = 2; degj = 2
-		while (degi <= 2) or (degj <= 2):
-			se = np.random.randint(len(edges))
-			si = edges[se][0]
-			sj = edges[se][1]
-			degi = self.graph.degree[si]
-			degj = self.graph.degree[sj]
-		self.sources += [{'i':si, 'j':sj, 'length':self._distance(self.pts[si], self.pts[sj]), 'phase':1}]
-		ti = si; tj = sj; te = se
-		while (te == se) or (ti == si) or (ti == sj) or (tj == si) or (tj == sj) or (degi <= 2) or (degj <= 2):
-			te = np.random.randint(len(edges))
-			ti = edges[te][0]
-			tj = edges[te][1]
-			degi = self.graph.degree[ti]
-			degj = self.graph.degree[tj]
-		phase = np.random.choice([-1,1])
-		self.targets += [{'i':ti, 'j':tj, 'length':self._distance(self.pts[ti], self.pts[tj]), 'phase':phase}]
+		# Identify edge points using Voronoi tessellation.
+		vor, tri, bound_pairs = self._find_boundary_pairs()
 
-		# remove the selected bonds.
-		self.graph.remove_edge(si,sj)
-		self.graph.remove_edge(ti,tj)
-		self._remove_dangling_edges()
-		self._set_coordination()
+		if len(bound_pairs) < 2:
+			print("Unable to find suitable source and target; switching to manual mode.")
+			self._pick_source_target()
 
-		self.plot()
+		else:
+			np.random.seed(self.seed)
+			se = np.random.randint(len(bound_pairs))
+			si = bound_pairs[se][0]
+			sj = bound_pairs[se][1]
+
+			# eliminate any overlapping pairs
+			for i in range(len(bound_pairs)-1,-1,-1):
+				if bound_pairs[i][0] == si or bound_pairs[i][0] == sj \
+				or bound_pairs[i][1] == si or bound_pairs[i][1] == sj:
+					bound_pairs.pop(i)
+
+			if len(bound_pairs) < 1:
+				print("Unable to find suitable source and target; switching to manual mode.")
+				self._pick_source_target()
+
+			else:
+				# Choose the pair that is furthest away from the source by computing the
+				# shortest path on the graph between the source nodes and all other
+				# bound pair nodes.
+				ti = bound_pairs[0][0]
+				tj = bound_pairs[0][1]
+				dmax = 0
+				for p in bound_pairs:
+					dii = nx.shortest_path_length(self.graph,si,p[0])
+					dij = nx.shortest_path_length(self.graph,si,p[1])
+					dji = nx.shortest_path_length(self.graph,sj,p[0])
+					djj = nx.shortest_path_length(self.graph,sj,p[1])
+					d = 0.25*(dii+dij+dji+djj)
+					if d > dmax:
+						dmax = d
+						ti, tj = p[0], p[1]
+
+				# To set the source and target phase, determine if angle formed by
+				# node pairs and shared node is obtuse (-1) or acute (+1):
+				sk = list(nx.common_neighbors(self.graph,si,sj))[0]
+				tk = list(nx.common_neighbors(self.graph,ti,tj))[0]
+				sa = self._angle(si,sk,sj)
+				ta = self._angle(ti,tk,tj)
+				if sa > np.pi/2: sp = -1
+				else: sp = 1
+				if ta > np.pi/2: tp = -1
+				else: tp = 1
+
+				self.sources += [{'i':si, 'j':sj, 'length':self._distance(self.pts[si], self.pts[sj]), 'phase':sp}]
+				self.targets += [{'i':ti, 'j':tj, 'length':self._distance(self.pts[ti], self.pts[tj]), 'phase':tp}]
+
+				# remove the selected bonds.
+				if self.graph.has_edge(si,sj):
+					self.graph.remove_edge(si,sj)
+				if self.graph.has_edge(ti,tj):
+					self.graph.remove_edge(ti,tj)
+				self._remove_dangling_edges()
+				self._set_coordination()
+
+				fig, ax = plt.subplots(1,1,figsize=(5,5))
+				voronoi_plot_2d(vor, ax, show_points=False, show_vertices=False, line_width=1, line_colors=[0.8,0.8,0.8])
+				ec, dc = self.plot_network(ax)
+				for source in self.sources:
+					s = self.plot_source(ax, source)
+				for target in self.targets:
+					t = self.plot_target(ax, target)
+				  
+				self.set_axes(ax)
+				plt.show()
+
+	def _find_boundary_pairs(self):
+		'''Identify node pairs on the boundary of the network.'''
+
+		min_degree = 3 # this will vary by dimensionality. Should always be dim+1.
+
+		# Construct Voronoi diagram.
+		vor = Voronoi(self.pts)
+		tri = Delaunay(self.pts)
+
+		# Vertex positions.
+		verts = vor.vertices
+		
+		# Identify pairs of nodes that share a Voronoi edge with exactly one vertex
+		# inside and one vertex outside the convex hull. They may be connected or not.
+		bound_pairs = []
+
+		for nodes, ridge in zip(vor.ridge_points, vor.ridge_vertices):
+			p1, p2 = nodes
+			v1, v2 = ridge
+
+			ch1 = (v1 >= 0) and (tri.find_simplex(verts[v1]) >= 0) # is bounded and inside
+			ch2 = (v2 >= 0) and (tri.find_simplex(verts[v2]) >= 0) # is bounded and inside
+
+			if (ch1 and (not ch2)) or ((not ch1) and ch2):
+				bound_pairs += [[p1, p2]]
+
+		#Filter out only nonbonded pairs with min_degree neighbors each,
+		# or bonded pairs with min_degree+1 neighbors each.
+		bound_pairs = [[p[0],p[1]] for p in bound_pairs
+					   if (not self.graph.has_edge(p[0],p[1]) and self.graph.degree(p[0]) >= min_degree
+					   and self.graph.degree(p[1]) >=min_degree)
+					   or (self.graph.has_edge(p[0],p[1]) and self.graph.degree(p[0]) >= min_degree+1
+					   and self.graph.degree(p[1]) >=min_degree+1)]
+
+		print(len(bound_pairs))
+
+		return vor, tri, bound_pairs
 
 	def _pick_source_target(self):
 		'''Select a pair of source and target nodes manually.
@@ -452,7 +539,7 @@ class Allosteric(Elastic):
 	*****************************************************************************************************
 	'''
 
-	def _applied_energy(self, t, n, q, _q, T, applied_args, eta):
+	def _applied_energy(self, t, n, q, _q, T, applied_args, train, eta):
 		'''Compute the elastic energy due to applied forces at the source(s) and target(s).
 		
 		Parameters
@@ -470,6 +557,8 @@ class Allosteric(Elastic):
 			stationary.
 		applied_args : tuple
 			Simulation arguments: the source strain(s), target strain(s), and pinning stiffness.
+		train : int
+			The type of training to perform. If train = 0 (default), no training is done.
 		eta : float
 			Learning rate by which to increment clamped strain towards the target.
 
@@ -483,13 +572,18 @@ class Allosteric(Elastic):
 		en = 0
 
 		if not hasattr(ess, '__len__'): ess = len(self.sources)*[ess]
+		if not hasattr(ets, '__len__'): ets = len(self.targets)*[ets]
 		
 		for es, source in zip(ess, self.sources):
 			if np.abs(es) > 0:
 				en += self._applied_strain_energy(t, n, q, (source, es, k, T))
+		for et, target in zip(ets, self.targets):
+			if np.abs(et) > 0:
+				if train == 0:
+					en += self._applied_strain_energy(t, n, q, (target, et, k, T))
 		return en
 
-	def _applied_force(self, t, n, q, _q, acc, _acc, T, applied_args, eta):
+	def _applied_force(self, t, n, q, _q, acc, _acc, T, applied_args, train, eta):
 		'''Compute the applied force at the source(s) and target(s).
 		
 		Parameters
@@ -513,6 +607,8 @@ class Allosteric(Elastic):
 			stationary.
 		applied_args : tuple
 			Simulation arguments: the source strain(s), target strain(s), and pinning stiffness.
+		train : int
+			The type of training to perform. If train = 0 (default), no training is done.
 		eta : float
 			Learning rate by which to increment clamped strain towards the target.
 		'''
@@ -534,10 +630,14 @@ class Allosteric(Elastic):
 				l = np.sqrt((q[2*i]-q[2*j])**2+(q[2*i+1]-q[2*j+1])**2)
 				ef = (l - l0)/l0
 				ec = ef + eta*(et - ef)
+				if train == 0:
+					self._applied_strain_force(t, n, q, acc, (target, et, k, T))
 				self._applied_strain_force(t, n, _q, _acc, (target, ec, k, T))
 
-	def _applied_jacobian(self, t, n, q, _q, dfdx, _dfdx, T, applied_args, eta):
+	def _applied_jacobian(self, t, n, q, _q, dfdx, _dfdx, T, applied_args, train, eta):
 		'''Compute the jacobian of the applied force at the source(s) and target(s).
+
+		This routine is only used when train=0.
 		
 		Parameters
 		----------
@@ -560,6 +660,8 @@ class Allosteric(Elastic):
 			stationary.
 		applied_args : tuple
 			Simulation arguments: the source strain(s), target strain(s), and pinning stiffness.
+		train : int
+			The type of training to perform. If train = 0 (default), no training is done.
 		eta : float
 			Learning rate by which to increment clamped strain towards the target.
 		'''
@@ -576,7 +678,9 @@ class Allosteric(Elastic):
 
 		for et, target in zip(ets, self.targets):
 			if np.abs(et) > 0:
-				self._applied_strain_jacobian(t, n, _q, _dfdx, (target, ec, k, T))
+				if train == 0:
+					self._applied_strain_jacobian(t, n, q, dfdx, (target, et, k, T))
+				self._applied_strain_jacobian(t, n, _q, _dfdx, (target, et, k, T))
 
 	def _applied_strain_energy(self, t, n, q, args):
 		'''Compute the elastic energy due to applied force for a single node pair.
@@ -602,7 +706,7 @@ class Allosteric(Elastic):
 		pair, eps, k, T = args
 		i = pair['i']; j = pair['j']
 		if T > 0:
-			l = pair['length']*(1 + eps/2 - eps/2*(self._cosine_pulse(t,T)))
+			l = pair['length']*(1 + pair['phase']*eps/2 - pair['phase']*eps/2*(self._cosine_pulse(t,T)))
 		else:
 			l = pair['length']*(1 + pair['phase']*eps)
 		xi, yi = q[2*i], q[2*i+1]
@@ -634,7 +738,7 @@ class Allosteric(Elastic):
 		pair, eps, k, T = args
 		i = pair['i']; j = pair['j']
 		if T > 0:
-			l = pair['length']*(1 + eps/2 - eps/2*(self._cosine_pulse(t,T)))
+			l = pair['length']*(1 + pair['phase']*eps/2 - pair['phase']*eps/2*(self._cosine_pulse(t,T)))
 		else:
 			l = pair['length']*(1 + pair['phase']*eps)
 		xi, yi = q[2*i], q[2*i+1]
@@ -668,7 +772,7 @@ class Allosteric(Elastic):
 		pair, eps, k, T = args
 		i = pair['i']; j = pair['j']
 		if T > 0:
-			l = pair['length']*(1 + eps/2 - eps/2*(self._cosine_pulse(t,T)))
+			l = pair['length']*(1 + pair['phase']*eps/2 - pair['phase']*eps/2*(self._cosine_pulse(t,T)))
 		else:
 			l = pair['length']*(1 + pair['phase']*eps)
 		xi, yi = q[2*i], q[2*i+1]

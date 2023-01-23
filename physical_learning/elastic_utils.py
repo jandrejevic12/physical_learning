@@ -192,6 +192,55 @@ class Elastic:
 
 		return np.sqrt(np.sum(np.square(p - q), axis=-1))
 
+	def _angle(self, i, j, k):
+		'''Compute the angle ijk between vectors ji and jk formed by nodes i,j,k.
+
+		Parameters
+		----------
+		i, j, k : int
+			Node indices.
+
+		Returns
+		-------
+		float
+			The angle in radians.
+		'''
+
+		vji = self.pts[i]-self.pts[j]
+		vjk = self.pts[k]-self.pts[j]
+		cost = np.dot(vji,vjk)/np.linalg.norm(vji)/np.linalg.norm(vjk)
+		return np.arccos(cost)
+
+	def _segment_intersect(self, p, q):
+	    '''Checks the intersection of segment p with segment q.
+
+		This algorithm was based on the following Stack Overflow:
+		#https://stackoverflow.com/questions/3838329/how-can-i-check-if-two-segments-intersect
+
+		Parameters
+		----------
+		p : list of lists or ndarray
+			The endpoints of the first segment, with coordinates stored as p[0] and p[1].
+		q : list of lists or ndarray
+			The endpoints of the second segment, with coordinates stored as q[0] and q[1].
+
+		Returns
+		-------
+		bool
+			Whether the two segments intersect.
+
+	    '''
+	    
+	    a, b = p[0], p[1]
+	    c, d = q[0], q[1]
+	    
+	    # Check if points a,b,c are in counterclockwise order by comparing the slopes of ab and ac.
+	    def ccw(a,b,c):
+	        return (c[1]-a[1])*(b[0]-a[0]) > (b[1]-a[1])*(c[0]-a[0])
+
+	    # If intersecting, only one of acd or bcd, and abc and abd, should be counterclockwise.
+	    return ccw(a,c,d) != ccw(b,c,d) and ccw(a,b,c) != ccw(a,b,d)
+
 	'''
 	*****************************************************************************************************
 	*****************************************************************************************************
@@ -366,10 +415,10 @@ class Elastic:
 
 		en = 0.
 		en += self._elastic_energy(t, n, q, l, k, network)
-		en += self._applied_energy(t, n, q, T, applied_args, eta)
+		en += self._applied_energy(t, n, q, T, applied_args, train, eta)
 		return en
 
-	def _applied_energy(self, t, n, q, _q, T, applied_args, eta):
+	def _applied_energy(self, t, n, q, _q, T, applied_args, train, eta):
 		raise NotImplementedError
 
 	def _ff(self, t, q, *args):
@@ -443,7 +492,7 @@ class Elastic:
 		self._dashpot_force(t, n, _q, l, _acc, network, self.params['dashpot'])
 		self._elastic_force(t, n, _q, l, k, _acc, network)
 
-		self._applied_force(t, n, q, _q, acc, _acc, T, applied_args, eta)
+		self._applied_force(t, n, q, _q, acc, _acc, T, applied_args, train, eta)
 
 		# update progress bar
 		if pbar:
@@ -513,14 +562,14 @@ class Elastic:
 		self._dashpot_jacobian(t, n, _q, l, _dfdx, _dfdv, network, self.params['dashpot'])
 		self._elastic_jacobian(t, n, _q, l, k, _dfdx, network)
 
-		self._applied_jacobian(t, n, q, _q, dfdx, _dfdx, T, applied_args, eta)
+		self._applied_jacobian(t, n, q, _q, dfdx, _dfdx, T, applied_args, train, eta)
 
 		return jac
 
-	def _applied_force(self, t, n, q, _q, acc, _acc, T, applied_args, eta):
+	def _applied_force(self, t, n, q, _q, acc, _acc, T, applied_args, train, eta):
 		raise NotImplementedError
 
-	def _applied_jacobian(self, t, n, q, _q, dfdx, _dfdx, T, applied_args, eta):
+	def _applied_jacobian(self, t, n, q, _q, dfdx, _dfdx, T, applied_args, train, eta):
 		raise NotImplementedError
 
 	@staticmethod
