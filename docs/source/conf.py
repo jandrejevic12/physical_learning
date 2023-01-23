@@ -61,7 +61,7 @@ REAL_MODULES = ['plot_imports', 'packing_utils', 'elastic_utils', 'allosteric_ut
 
 for mod_name in MOCK_MODULES:
     sys.modules[mod_name] = mock.Mock()
-form mod_name in REAL_MODULES:
+for mod_name in REAL_MODULES:
 	sys.modules[mod_name] = eval(mod_name)
 
 #def setup(app):
