@@ -55,13 +55,11 @@ def setup(app):
 
 	MOCK_MODULES = ['numpy', 'scipy', 'scipy.integrate', 'scipy.spatial', 'scipy.linalg', 'cmocean', 'networkx',
 			'numba', 'pandas', 'poisson_disc', 'skimage', 'sklearn', 'tqdm',
-			'matplotlib', 'matplotlib.pyplot', 'matplotlib.collections', 'matplotlib.animation', 'matplotlib.ticker']
+			'matplotlib', 'matplotlib.pyplot', 'matplotlib.collections', 'matplotlib.animation', 'matplotlib.ticker',
+			'plot_imports']
 
 	for mod_name in MOCK_MODULES:
 		sys.modules[mod_name] = mock.Mock()
-
-	from physical_learning import plot_imports
-	sys.modules['plot_imports'] = plot_imports
 
 	from physical_learning import packing_utils
 	packing_utils.Packing.__name__ = 'Packing'
