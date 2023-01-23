@@ -50,29 +50,29 @@ import sys
 sys.path.insert(0, os.path.abspath('./../..'))
 
 # to display docs when using C-based packages
-import mock
-from physical_learning import plot_imports, packing_utils, elastic_utils, allosteric_utils, lammps_utils
- 
-MOCK_MODULES = ['numpy', 'scipy', 'scipy.integrate', 'scipy.spatial', 'scipy.linalg', 'cmocean', 'networkx',
-		'numba', 'pandas', 'poisson_disc', 'skimage', 'sklearn', 'tqdm',
-		'matplotlib', 'matplotlib.pyplot', 'matplotlib.collections', 'matplotlib.animation', 'matplotlib.ticker']
 
-REAL_MODULES = ['plot_imports', 'packing_utils', 'elastic_utils', 'allosteric_utils', 'lammps_utils']
-
-for mod_name in MOCK_MODULES:
-    sys.modules[mod_name] = mock.Mock()
-for mod_name in REAL_MODULES:
-	sys.modules[mod_name] = eval(mod_name)
-
-#def setup(app):
-    
-    # need to assign the names here, otherwise autodoc won't document these classes,
+def setup(app):
+    import mock
+	from physical_learning import plot_imports, packing_utils, elastic_utils, allosteric_utils, lammps_utils
+	# need to assign the names here, otherwise autodoc won't document these classes,
     # and will instead just say 'alias of ...'
-#    packing_utils.Packing.__name__ = 'Packing'
-#    elastic_utils.Elastic__name__ = 'Elastic'
-#    allosteric_utils.Allosteric.__name__ = 'Allosteric'
-#    app.connect('build-finished', build_finished)
+    packing_utils.Packing.__name__ = 'Packing'
+    elastic_utils.Elastic__name__ = 'Elastic'
+    allosteric_utils.Allosteric.__name__ = 'Allosteric'
+    
+	MOCK_MODULES = ['numpy', 'scipy', 'scipy.integrate', 'scipy.spatial', 'scipy.linalg', 'cmocean', 'networkx',
+			'numba', 'pandas', 'poisson_disc', 'skimage', 'sklearn', 'tqdm',
+			'matplotlib', 'matplotlib.pyplot', 'matplotlib.collections', 'matplotlib.animation', 'matplotlib.ticker']
 
-#def build_finished(app, exception):
-#    pass
+	REAL_MODULES = ['plot_imports', 'packing_utils', 'elastic_utils', 'allosteric_utils', 'lammps_utils']
+
+	for mod_name in MOCK_MODULES:
+	    sys.modules[mod_name] = mock.Mock()
+	for mod_name in REAL_MODULES:
+		sys.modules[mod_name] = eval(mod_name)
+
+    app.connect('build-finished', build_finished)
+
+def build_finished(app, exception):
+    pass
 
