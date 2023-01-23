@@ -60,6 +60,7 @@ for mod_name in MOCK_MODULES:
     sys.modules[mod_name] = mock.Mock()
 
 import physical_learning
+from physical_learning import elastic_utils
 physical_learning.elastic_utils.Elastic.__name__ = 'Elastic'
 physical_learning.allosteric_utils.Allosteric.__name__ = 'Allosteric'
 
