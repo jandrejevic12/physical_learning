@@ -60,12 +60,12 @@ for mod_name in MOCK_MODULES:
     sys.modules[mod_name] = mock.Mock()
 
 def setup(app):
-    from physical_learning import physical_learning
+    from physical_learning import packing_utils, elastic_utils, allosteric_utils
     # need to assign the names here, otherwise autodoc won't document these classes,
     # and will instead just say 'alias of ...'
-    physical_learning.packing_utils.Packing.__name__ = 'Packing'
-    physical_learning.elastic_utils.Elastic__name__ = 'Elastic'
-    physical_learning.allosteric_utils.Allosteric.__name__ = 'Allosteric'
+    packing_utils.Packing.__name__ = 'Packing'
+    elastic_utils.Elastic__name__ = 'Elastic'
+    allosteric_utils.Allosteric.__name__ = 'Allosteric'
     app.connect('build-finished', build_finished)
 
 def build_finished(app, exception):
