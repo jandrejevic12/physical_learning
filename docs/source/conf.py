@@ -60,7 +60,7 @@ for mod_name in MOCK_MODULES:
     sys.modules[mod_name] = mock.Mock()
 
 def setup(app):
-    import physical_learning
+    from physical_learning import physical_learning
     # need to assign the names here, otherwise autodoc won't document these classes,
     # and will instead just say 'alias of ...'
     physical_learning.packing_utils.Packing.__name__ = 'Packing'
