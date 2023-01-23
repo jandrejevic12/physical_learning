@@ -49,7 +49,7 @@ import sys
 #Location of Sphinx files
 sys.path.insert(0, os.path.abspath('./../..'))
 
-# to display docs when using C-based packages
+# to display docs when using imported packages
 def setup(app):
 	import mock
 
@@ -60,17 +60,23 @@ def setup(app):
 	for mod_name in MOCK_MODULES:
 		sys.modules[mod_name] = mock.Mock()
 
-	from physical_learning import plot_imports, packing_utils, elastic_utils, allosteric_utils, lammps_utils
-	# need to assign the names here, otherwise autodoc won't document these classes,
-	# and will instead just say 'alias of ...'
+	from physical_learning import plot_imports
+	sys.modules['plot_imports'] = plot_imports
+
+	from physical_learning import packing_utils
 	packing_utils.Packing.__name__ = 'Packing'
-	elastic_utils.Elastic__name__ = 'Elastic'
+	sys.modules['packing_utils'] = packing_utils
+
+	from physical_learning import elastic_utils
+	elastic_utils.Elastic.__name__ = 'Elastic'
+	sys.modules['elastic_utils'] = elastic_utils
+
+	from physical_learning import allosteric_utils
 	allosteric_utils.Allosteric.__name__ = 'Allosteric'
+	sys.modules['allosteric_utils'] = allosteric_utils
 
-	REAL_MODULES = ['plot_imports', 'packing_utils', 'elastic_utils', 'allosteric_utils', 'lammps_utils']
-
-	for mod_name in REAL_MODULES:
-		sys.modules[mod_name] = eval(mod_name)
+	from physical_learning import lammps_utils
+	sys.modules['lammps_utils'] = lammps_utils
 
 	app.connect('build-finished', build_finished)
 
