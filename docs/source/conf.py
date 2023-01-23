@@ -50,12 +50,16 @@ import sys
 sys.path.insert(0, os.path.abspath('./../..'))
 
 # to display docs when using C-based packages
+import physical_learning
+physical_learning.elastic_utils.Elastic.__name__ = 'Elastic'
+physical_learning.allosteric_utils.Allosteric.__name__ = 'Allosteric'
+
 import mock
  
 MOCK_MODULES = ['numpy', 'scipy', 'scipy.integrate', 'scipy.spatial', 'scipy.linalg', 'cmocean', 'networkx',
 		'numba', 'pandas', 'poisson_disc', 'skimage', 'sklearn', 'tqdm',
 		'matplotlib', 'matplotlib.pyplot', 'matplotlib.collections', 'matplotlib.animation', 'matplotlib.ticker',
-		'plot_imports', 'elastic_utils', 'allosteric_utils', 'lammps_utils']
+		'plot_imports']
 for mod_name in MOCK_MODULES:
     sys.modules[mod_name] = mock.Mock()
 
