@@ -45,11 +45,6 @@ add_module_names = False
 # -- Options for nbsphinx
 nbsphinx_execute = 'never'
 
-# -- Options for gallery
-sphinx_gallery_conf = {
-    'thumbnail_size': (300, 300),
-}
-
 import os
 import sys
 #Location of Sphinx files
