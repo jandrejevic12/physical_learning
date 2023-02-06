@@ -33,7 +33,8 @@ def read_dump(filename):
 	for fr in range(frames):
 		for i in range(n):
 			line = lines[m*fr+2+i]
-			x, y, z = np.array(line.strip().split()).astype(float)
+			line = np.array(line.strip().split()).astype(float)
+			x, y, z = line[-3], line[-2], line[-1]
 			traj[fr,i,0] = x
 			traj[fr,i,1] = y
 			traj[fr,i,2] = z
