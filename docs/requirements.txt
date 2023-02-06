@@ -1,3 +1,2 @@
 ipykernel
 nbsphinx
-sphinx-gallery>=0.6
