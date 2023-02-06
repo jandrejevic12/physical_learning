@@ -55,7 +55,7 @@ def setup(app):
 	import mock
 
 	MOCK_MODULES = ['numpy', 'scipy', 'scipy.integrate', 'scipy.spatial', 'scipy.linalg', 'cmocean', 'networkx',
-			'numba', 'pandas', 'poisson_disc', 'skimage', 'sklearn', 'tqdm',
+			'numba', 'pandas', 'poisson_disc', 'skimage', 'sklearn', 'sklearn.cluster', 'sklearn.metrics', 'tqdm',
 			'matplotlib', 'matplotlib.pyplot', 'matplotlib.collections', 'matplotlib.animation', 'matplotlib.ticker',
 			'vapory', 'plot_imports']
 
