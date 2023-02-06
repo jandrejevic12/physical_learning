@@ -3,18 +3,20 @@ import numpy as np
 from plot_imports import *
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from matplotlib import collections  as mc
+from matplotlib import collections as mc
 import matplotlib.animation as animation
 
 from scipy.linalg import orthogonal_procrustes as procrustes
+from scipy.spatial import ConvexHull
 
 import networkx as nx
 from scipy.integrate import solve_ivp
 from tqdm import tqdm
 
 from numba import jit
+from vapory import *
 
-class Elastic:
+class Elastic(object):
 	'''Class to simulate an elastic network with trainable bonds and rest lengths.
 	
 	Parameters
@@ -22,6 +24,8 @@ class Elastic:
 	graph : str or networkx.graph
 		If string, filename of saved graph specifying the nodes and edge connections of
 		the elastic network. If networkx.graph object, the graph to use.
+	dim : int
+		The dimensionality of the system. Valid options are 2 and 3.
 	params : dict, optional
 		Specifies system parameters. Required keywords are :
 
@@ -36,6 +40,8 @@ class Elastic:
 		Graph specifying the nodes and edges in the network. A stiffness, rest length,
 		and "trainable" parameter are associated with each edge. A trainable edge will
 		be updated during training.
+	dim : int
+		The dimensionality of the system. Valid options are 2 and 3.
 	seed : int
 		A random seed used for selecting sources and targets at random.
 	n : int
@@ -51,17 +57,21 @@ class Elastic:
 		biggest connected component of the system.
 	dZ : float
 		The excess coordination, defined as Z - Ziso, where Ziso is the average coordination required
-		for isostaticity (Ziso = 4 - 6/nc in 2D).
+		for isostaticity.
 	traj : ndarray
 		The simulated trajectory of the network produced after a call to the solve() routine.
 	t_eval : ndarray
 		The corresponding time at each simulated frame.
 	'''
 
-	def __init__(self, graph, params={'rfac':0.05, 'drag':0.005, 'dashpot':10., 'stiffness':1.}):
+	def __init__(self, graph, dim=2, params={'rfac':0.05, 'drag':0.005, 'dashpot':10., 'stiffness':1.}):
+
+		if (dim != 2) and (dim != 3):
+			raise ValueError("Dimension must be 2 or 3.")
 
 		self.params = params
 		self.graph = graph
+		self.dim = dim
 
 		if 'stiffness' not in list(self.graph.edges(data=True))[0][2]:
 			nx.set_edge_attributes(self.graph, self.params['stiffness'], 'stiffness')
@@ -72,15 +82,16 @@ class Elastic:
 
 		# set network node positions and elastic properties
 		self.n = len(self.graph.nodes())
-		self.pts = np.zeros((self.n,2)) # free state, main memory
-		self._pts = np.zeros((self.n,2)) # clamped state
+		self.pts = np.zeros((self.n,3))
 		for i in range(self.n):
 			self.pts[i,:] = self.graph.nodes[i]['pos']
-			self._pts[i,:] = self.graph.nodes[i]['pos']
 		self._set_attributes()
 		self._set_coordination()
 
 		self.pts_init = np.copy(self.pts)
+
+		# Set up some default 3D visualization properties.
+		self.reset_view()
 
 	'''
 	*****************************************************************************************************
@@ -116,14 +127,24 @@ class Elastic:
 		self.ne = len(self.graph.edges())
 		self.nc = self.n-np.sum(self.degree==0).astype(int) # connected nodes
 		self.Z = 2*self.ne/float(self.nc)
-		self.Ziso = 4. - 6./self.nc
+		self.Ziso = 2*self.dim - self.dim*(self.dim+1)/float(self.nc)
 		self.dZ = self.Z - self.Ziso
 
 	def reset_init(self):
 		'''Reset the network to its initial, relaxed state.'''
 
 		self.pts = np.copy(self.pts_init)
-		self._pts = np.copy(self.pts_init)
+
+	def reset_equilibrium(self):
+		'''Set the current network state to its equilibrium state.'''
+
+		# reset equilibrium node positions
+		self.pts_init = np.copy(self.pts)
+		
+		# reset edge rest lengths
+		for edge in self.graph.edges(data=True):
+			i, j = edge[0], edge[1]
+			edge[2]['length'] = self._distance(self.pts[i], self.pts[j])
 
 	def _remove_dangling_edges(self):
 		'''Remove connections to nodes with only one bond.'''
@@ -167,12 +188,13 @@ class Elastic:
 
 		self.reset_init()
 		with open(filename, 'w') as f:
+			f.write(str(self.dim)+'\n')
 			f.write(str(self.n)+'\n')
 			for i in range(self.n):
-				f.write('{:.12g} {:.12g}\n'.format(self.pts[i,0],self.pts[i,1]))
+				f.write('{:.15g} {:.15g} {:.15g}\n'.format(self.pts[i,0],self.pts[i,1],self.pts[i,2]))
 			f.write(str(len(self.graph.edges()))+'\n')
 			for edge in self.graph.edges(data=True):
-				f.write('{:d} {:d} {:.12g} {:.12g} {:d}\n'.format(edge[0],edge[1],edge[2]['stiffness'], edge[2]['length'], edge['trainable']))
+				f.write('{:d} {:d} {:.15g} {:.15g} {:d}\n'.format(edge[0],edge[1],edge[2]['stiffness'], edge[2]['length'], edge['trainable']))
 
 	def _distance(self, p, q):
 		'''Compute the distance between two coordinate pairs p and q.
@@ -191,55 +213,6 @@ class Elastic:
 		'''
 
 		return np.sqrt(np.sum(np.square(p - q), axis=-1))
-
-	def _angle(self, i, j, k):
-		'''Compute the angle ijk between vectors ji and jk formed by nodes i,j,k.
-
-		Parameters
-		----------
-		i, j, k : int
-			Node indices.
-
-		Returns
-		-------
-		float
-			The angle in radians.
-		'''
-
-		vji = self.pts[i]-self.pts[j]
-		vjk = self.pts[k]-self.pts[j]
-		cost = np.dot(vji,vjk)/np.linalg.norm(vji)/np.linalg.norm(vjk)
-		return np.arccos(cost)
-
-	def _segment_intersect(self, p, q):
-	    '''Checks the intersection of segment p with segment q.
-
-		This algorithm was based on the following Stack Overflow:
-		#https://stackoverflow.com/questions/3838329/how-can-i-check-if-two-segments-intersect
-
-		Parameters
-		----------
-		p : list of lists or ndarray
-			The endpoints of the first segment, with coordinates stored as p[0] and p[1].
-		q : list of lists or ndarray
-			The endpoints of the second segment, with coordinates stored as q[0] and q[1].
-
-		Returns
-		-------
-		bool
-			Whether the two segments intersect.
-
-	    '''
-	    
-	    a, b = p[0], p[1]
-	    c, d = q[0], q[1]
-	    
-	    # Check if points a,b,c are in counterclockwise order by comparing the slopes of ab and ac.
-	    def ccw(a,b,c):
-	        return (c[1]-a[1])*(b[0]-a[0]) > (b[1]-a[1])*(c[0]-a[0])
-
-	    # If intersecting, only one of acd or bcd, and abc and abd, should be counterclockwise.
-	    return ccw(a,c,d) != ccw(b,c,d) and ccw(a,b,c) != ccw(a,b,d)
 
 	'''
 	*****************************************************************************************************
@@ -288,12 +261,17 @@ class Elastic:
 		network = (edge_i, edge_j, edge_k, edge_l, edge_t)
 		n = self.n
 
-		q = np.hstack([self.pts.ravel(),np.zeros(2*n),
-					   self._pts.ravel(),np.zeros(2*n)])
-		if train == 1:
-			q = np.hstack([q, edge_l])
-		elif train == 2:
-			q = np.hstack([q, edge_k])
+		q = np.hstack([self.pts.ravel(),np.zeros(3*n)])
+
+		# if training, augment with one additional network:
+		# base network is the free strained state.
+		# second is the clamped strained state.
+		if train:
+			q = np.hstack([q,self.pts.ravel(),np.zeros(3*n)])
+			if train == 1:
+				q = np.hstack([q, edge_l]) # train lengths
+			else:
+				q = np.hstack([q, edge_k]) # train stiffnesses
 
 		ti = 0; tf = duration
 		t_span = [ti, tf]
@@ -324,19 +302,21 @@ class Elastic:
 
 
 		q = sol.y.T
-		self.traj = np.copy(q[:,:2*n].reshape(frames+1, n, 2))
-		self._traj = np.copy(q[:,4*n:6*n].reshape(frames+1, n, 2))
+		self.traj = np.copy(q[:,:3*n].reshape(frames+1, n, 3))
 		self.pts = np.copy(self.traj[-1])
-		self._pts = np.copy(self._traj[-1])
 
-		if train == 1:
-			edge_l = q[-1,8*n:]
-			for e, edge in enumerate(self.graph.edges(data=True)):
-				edge[2]['length'] = edge_l[e]
-		elif train == 2:
-			edge_k = q[-1,8*n:]
-			for e, edge in enumerate(self.graph.edges(data=True)):
-				edge[2]['stiffness'] = edge_k[e]
+		if train:
+			self.traj_c = np.copy(q[:,6*n:9*n].reshape(frames+1, n, 3))
+			self.pts_c = np.copy(self.traj_c[-1])
+
+			if train == 1:
+				edge_l = q[-1,12*n:]
+				for e, edge in enumerate(self.graph.edges(data=True)):
+					edge[2]['length'] = edge_l[e]
+			else:
+				edge_k = q[-1,12*n:]
+				for e, edge in enumerate(self.graph.edges(data=True)):
+					edge[2]['stiffness'] = edge_k[e]
 
 	def _edge_lists(self):
 		'''Copy edge properties stored in networkx object into numpy arrays for easy access.
@@ -404,21 +384,21 @@ class Elastic:
 		n = self.n
 
 		if train == 1:
-			l = q[8*n:]
+			l = q[12*n:]
 			k = edge_k
 		elif train == 2:
 			l = edge_l
-			k = q[8*n:]
+			k = q[12*n:]
 		else:
 			l = edge_l
 			k = edge_k
 
 		en = 0.
 		en += self._elastic_energy(t, n, q, l, k, network)
-		en += self._applied_energy(t, n, q, T, applied_args, train, eta)
+		en += self._applied_energy(t, n, q, T, applied_args)
 		return en
 
-	def _applied_energy(self, t, n, q, _q, T, applied_args, train, eta):
+	def _applied_energy(self, t, n, q, T, applied_args):
 		raise NotImplementedError
 
 	def _ff(self, t, q, *args):
@@ -456,43 +436,52 @@ class Elastic:
 		edge_i, edge_j, edge_k, edge_l, edge_t = network
 		n = self.n
 
-		_q = q[4*n:8*n]
 		fun = np.zeros_like(q)
-		acc = fun[2*n:4*n]
-		_fun = fun[4*n:8*n]
-		_acc = _fun[2*n:4*n]
+		acc = fun[3*n:6*n]
 
 		if train:
+			q_c = q[6*n:12*n]
+			fun_c = fun[6*n:12*n]
+			acc_c = fun_c[3*n:6*n]
+
 			if train == 1:
-				l = q[8*n:]
+				l = q[12*n:]
 				k = edge_k
-				dl = fun[8*n:]
+				dl = fun[12*n:]
 
-				if method == 'learning': self._length_update_learning(t, n, q, _q, l, dl, eta, alpha, network)
-				else: self._length_update_aging(t, n, q, _q, l, dl, eta, alpha, network)
+				if method == 'learning':
+					self._length_update_learning(t, n, q, q_c, l, dl, eta, alpha, network)
+				else:
+					self._length_update_aging(t, n, q, q_c, l, dl, eta, alpha, network)
 				
-			elif train == 2:
+			else:
 				l = edge_l
-				k = q[8*n:]
-				dk = fun[8*n:]
+				k = q[12*n:]
+				dk = fun[12*n:]
 
-				if method == 'learning': self._stiffness_update_learning(t, n, q, _q, k, dk, eta, alpha, network)
-				else: self._stiffness_update_aging(t, n, q, _q, k, dk, eta, alpha, network)
+				if method == 'learning':
+					self._stiffness_update_learning(t, n, q, q_c, k, dk, eta, alpha, network)
+				else:
+					self._stiffness_update_aging(t, n, q, q_c, k, dk, eta, alpha, network)
 		else:
 			l = edge_l
 			k = edge_k
 		
-		# free state
+		# base network
 		self._drag_force(t, n, q, fun, network, self.params['drag'])
 		self._dashpot_force(t, n, q, l, acc, network, self.params['dashpot'])
 		self._elastic_force(t, n, q, l, k, acc, network)
 
-		# clamped state
-		self._drag_force(t, n, _q, _fun, network, self.params['drag'])
-		self._dashpot_force(t, n, _q, l, _acc, network, self.params['dashpot'])
-		self._elastic_force(t, n, _q, l, k, _acc, network)
+		if train:
+			# clamped state
+			self._drag_force(t, n, q_c, fun_c, network, self.params['drag'])
+			self._dashpot_force(t, n, q_c, l, acc_c, network, self.params['dashpot'])
+			self._elastic_force(t, n, q_c, l, k, acc_c, network)
 
-		self._applied_force(t, n, q, _q, acc, _acc, T, applied_args, train, eta)
+			self._applied_force(t, n, q, q_c, acc, acc_c, T, applied_args, train, eta)
+		else:
+			self._applied_force(t, n, q, q, acc, acc, T, applied_args, train, eta)
+
 
 		# update progress bar
 		if pbar:
@@ -535,41 +524,32 @@ class Elastic:
 			Jacobian of the derivative.
 		'''
 
+		# Note: this method is only used when training is off. So, auxiliary networks are not used.
+
 		T, network, applied_args, train, method, eta, alpha, pbar = args
 		edge_i, edge_j, edge_k, edge_l, edge_t = network
 		n = self.n
 
-		_q = q[4*n:]
 		jac = np.zeros((len(q),len(q)))
-		_jac = jac[4*n:,4*n:]
-		for i in range(2*n):
-			jac[i,2*n+i] = 1
-			_jac[i,2*n+i] = 1
-		dfdx = jac[2*n:4*n,:2*n]
-		dfdv = jac[2*n:4*n,2*n:4*n]
-		_dfdx = _jac[2*n:4*n,:2*n]
-		_dfdv = _jac[2*n:4*n,2*n:4*n]
+		for i in range(3*n):
+			jac[i,3*n+i] = 1
+		dfdx = jac[3*n:6*n,:3*n]
+		dfdv = jac[3*n:6*n,3*n:6*n]
+
 		l = edge_l
 		k = edge_k
 
-		# free state
 		self._drag_jacobian(t, n, q, dfdv, network, self.params['drag'])
 		self._dashpot_jacobian(t, n, q, l, dfdx, dfdv, network, self.params['dashpot'])
 		self._elastic_jacobian(t, n, q, l, k, dfdx, network)
-
-		# clamped state
-		self._drag_jacobian(t, n, _q, _dfdv, network, self.params['drag'])
-		self._dashpot_jacobian(t, n, _q, l, _dfdx, _dfdv, network, self.params['dashpot'])
-		self._elastic_jacobian(t, n, _q, l, k, _dfdx, network)
-
-		self._applied_jacobian(t, n, q, _q, dfdx, _dfdx, T, applied_args, train, eta)
+		self._applied_jacobian(t, n, q, dfdx, T, applied_args)
 
 		return jac
 
-	def _applied_force(self, t, n, q, _q, acc, _acc, T, applied_args, train, eta):
+	def _applied_force(self, t, n, q, q_c, acc, acc_c, T, applied_args, train, eta):
 		raise NotImplementedError
 
-	def _applied_jacobian(self, t, n, q, _q, dfdx, _dfdx, T, applied_args, train, eta):
+	def _applied_jacobian(self, t, n, q, dfdx, T, applied_args):
 		raise NotImplementedError
 
 	@staticmethod
@@ -593,14 +573,16 @@ class Elastic:
 			The drag coefficient.
 		'''
 
-		vel = q[2*n:4*n]
-		acc = fun[2*n:4*n]
+		vel = q[3*n:6*n]
+		acc = fun[3*n:6*n]
 		for i in range(n):
-			vx, vy = vel[2*i], vel[2*i+1]
-			acc[2*i] -= b*vx
-			acc[2*i+1] -= b*vy
-			fun[2*i] = vx
-			fun[2*i+1] = vy
+			vx, vy, vz = vel[3*i], vel[3*i+1], vel[3*i+2]
+			acc[3*i] -= b*vx
+			acc[3*i+1] -= b*vy
+			acc[3*i+2] -= b*vz
+			fun[3*i] = vx
+			fun[3*i+1] = vy
+			fun[3*i+2] = vz
 
 	@staticmethod
 	@jit(nopython=True)
@@ -623,7 +605,7 @@ class Elastic:
 			The drag coefficient.
 		'''
 
-		for i in range(2*n):
+		for i in range(3*n):
 			jac[i,i] -= b
 
 	@staticmethod
@@ -657,10 +639,10 @@ class Elastic:
 		en = 0.
 		edge_i, edge_j, edge_k, edge_l, edge_t = network
 		for e,(i, j) in enumerate(zip(edge_i, edge_j)):
-			xi, yi = q[2*i], q[2*i+1]
-			xj, yj = q[2*j], q[2*j+1]
-			dx = xi-xj; dy = yi-yj
-			r = np.sqrt(dx**2 + dy**2)
+			xi, yi, zi = q[3*i], q[3*i+1], q[3*i+2]
+			xj, yj, zj = q[3*j], q[3*j+1], q[3*j+2]
+			dx = xi-xj; dy = yi-yj; dz = zi-zj
+			r = np.sqrt(dx**2 + dy**2 + dz**2)
 			en += k[e]*(r-l[e])**2
 		return 0.5*en
 
@@ -691,15 +673,16 @@ class Elastic:
 
 		edge_i, edge_j, edge_k, edge_l, edge_t = network
 		for e,(i, j) in enumerate(zip(edge_i, edge_j)):
-			xi, yi = q[2*i], q[2*i+1]
-			xj, yj = q[2*j], q[2*j+1]
-			dx = xi-xj; dy = yi-yj
-			r = np.sqrt(dx**2 + dy**2)
+			xi, yi, zi = q[3*i], q[3*i+1], q[3*i+2]
+			xj, yj, zj = q[3*j], q[3*j+1], q[3*j+2]
+			dx = xi-xj; dy = yi-yj; dz = zi-zj
+			r = np.sqrt(dx**2 + dy**2 + dz**2)
 			fac = -k[e]*(1 - l[e]/r)
 			fx = fac*dx
 			fy = fac*dy
-			acc[2*i] += fx; acc[2*i+1] += fy
-			acc[2*j] -= fx; acc[2*j+1] -= fy
+			fz = fac*dz
+			acc[3*i] += fx; acc[3*i+1] += fy; acc[3*i+2] += fz
+			acc[3*j] -= fx; acc[3*j+1] -= fy; acc[3*j+2] -= fz
 
 	@staticmethod
 	@jit(nopython=True)
@@ -728,33 +711,59 @@ class Elastic:
 
 		edge_i, edge_j, edge_k, edge_l, edge_t = network
 		for e,(i, j) in enumerate(zip(edge_i, edge_j)):
-			xi, yi = q[2*i], q[2*i+1]
-			xj, yj = q[2*j], q[2*j+1]
-			dx = xi-xj; dy = yi-yj
-			r2 = dx**2 + dy**2
+			xi, yi, zi = q[3*i], q[3*i+1], q[3*i+2]
+			xj, yj, zj = q[3*j], q[3*j+1], q[3*j+2]
+			dx = xi-xj; dy = yi-yj; dz = zi-zj
+			r2 = dx**2 + dy**2 + dz**2
 			r = np.sqrt(r2); r3 = r2*r
 			xx = -k[e]*(l[e]/r*(dx*dx/r2-1)+1)
 			yy = -k[e]*(l[e]/r*(dy*dy/r2-1)+1)
+			zz = -k[e]*(l[e]/r*(dz*dz/r2-1)+1)
 			xy = -k[e]*l[e]*dx*dy/r3
+			xz = -k[e]*l[e]*dx*dz/r3
+			yz = -k[e]*l[e]*dy*dz/r3
 			
-			jac[2*i,2*i] += xx # xixi
-			jac[2*i+1,2*i+1] += yy # yiyi
-			jac[2*i,2*i+1] += xy # xiyi
-			jac[2*i+1,2*i] += xy # yixi
+			jac[3*i,3*i] += xx # xixi
+			jac[3*i+1,3*i+1] += yy # yiyi
+			jac[3*i+2,3*i+2] += zz # zizi
+			jac[3*i,3*i+1] += xy # xiyi
+			jac[3*i+1,3*i] += xy # yixi
+			jac[3*i,3*i+2] += xz # xizi
+			jac[3*i+2,3*i] += xz # zixi
+			jac[3*i+1,3*i+2] += yz # yizi
+			jac[3*i+2,3*i+1] += yz # ziyi
 
-			jac[2*j,2*j] += xx # xjxj
-			jac[2*j+1,2*j+1] += yy # yjyj
-			jac[2*j,2*j+1] += xy # xjyj
-			jac[2*j+1,2*j] += xy # yjxj
+			jac[3*j,3*j] += xx # xjxj
+			jac[3*j+1,3*j+1] += yy # yjyj
+			jac[3*j+2,3*j+2] += zz # zjzj
+			jac[3*j,3*j+1] += xy # xjyj
+			jac[3*j+1,3*j] += xy # yjxj
+			jac[3*j,3*j+2] += xz # xjzj
+			jac[3*j+2,3*j] += xz # zjxj
+			jac[3*j+1,3*j+2] += yz # yjzj
+			jac[3*j+2,3*j+1] += yz # zjyj
 
-			jac[2*i,2*j] -= xx # xixj
-			jac[2*j,2*i] -= xx # xjxi
-			jac[2*i+1,2*j+1] -= yy # yiyj
-			jac[2*j+1,2*i+1] -= yy # yjyi
-			jac[2*i,2*j+1] -= xy # xiyj
-			jac[2*j,2*i+1] -= xy # xjyi
-			jac[2*i+1,2*j] -= xy # yixj
-			jac[2*j+1,2*i] -= xy # yjxi
+			jac[3*i,3*j] -= xx # xixj
+			jac[3*j,3*i] -= xx # xjxi
+			jac[3*i+1,3*j+1] -= yy # yiyj
+			jac[3*j+1,3*i+1] -= yy # yjyi
+			jac[3*i+2,3*j+2] -= zz # zizj
+			jac[3*j+2,3*i+2] -= zz # zjzi
+
+			jac[3*i,3*j+1] -= xy # xiyj
+			jac[3*j,3*i+1] -= xy # xjyi
+			jac[3*i+1,3*j] -= xy # yixj
+			jac[3*j+1,3*i] -= xy # yjxi
+
+			jac[3*i,3*j+2] -= xz # xizj
+			jac[3*j,3*i+2] -= xz # xjzi
+			jac[3*i+2,3*j] -= xz # zixj
+			jac[3*j+2,3*i] -= xz # zjxi
+
+			jac[3*i+1,3*j+2] -= yz # yizj
+			jac[3*j+1,3*i+2] -= yz # yjzi
+			jac[3*i+2,3*j+1] -= yz # ziyj
+			jac[3*j+2,3*i+1] -= yz # zjyi
 
 	@staticmethod
 	@jit(nopython=True)
@@ -772,9 +781,6 @@ class Elastic:
 		l : ndarray
 			The rest length of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		k : ndarray
-			The stiffness of each bond. Different from network lists if it is a
-			learning degree of freedom.
 		acc : ndarray
 			The acceleration of each node, populated as output.
 		network : tuple of ndarrays
@@ -785,20 +791,21 @@ class Elastic:
 
 		edge_i, edge_j, edge_k, edge_l, edge_t = network
 		for e,(i, j) in enumerate(zip(edge_i, edge_j)):
-			xi, yi = q[2*i], q[2*i+1]
-			xj, yj = q[2*j], q[2*j+1]
-			vxi, vyi = q[2*i+2*n], q[2*i+1+2*n]
-			vxj, vyj = q[2*j+2*n], q[2*j+1+2*n]
-			dx = xi-xj; dy = yi-yj
-			dvx = vxi-vxj; dvy = vyi-vyj
-			r2 = dx**2 + dy**2
+			xi, yi, zi = q[3*i], q[3*i+1], q[3*i+2]
+			xj, yj, zj = q[3*j], q[3*j+1], q[3*j+2]
+			vxi, vyi, vzi = q[3*i+3*n], q[3*i+1+3*n], q[3*i+2+3*n]
+			vxj, vyj, vzj = q[3*j+3*n], q[3*j+1+3*n], q[3*j+2+3*n]
+			dx = xi-xj; dy = yi-yj; dz = zi-zj
+			dvx = vxi-vxj; dvy = vyi-vyj; dvz = vzi-vzj
+			r2 = dx**2 + dy**2 + dz**2
 			r = np.sqrt(r2)
 			fac = -(1 - l[e]/r)
-			vfac = -l[e]*(dx*dvx + dy*dvy)/(r2*r)
+			vfac = -l[e]*(dx*dvx + dy*dvy + dz*dvz)/(r2*r)
 			fvx = b*(fac*dvx + vfac*dx)
 			fvy = b*(fac*dvy + vfac*dy)
-			acc[2*i] += fvx; acc[2*i+1] += fvy
-			acc[2*j] -= fvx; acc[2*j+1] -= fvy
+			fvz = b*(fac*dvz + vfac*dz)
+			acc[3*i] += fvx; acc[3*i+1] += fvy; acc[3*i+2] += fvz
+			acc[3*j] -= fvx; acc[3*j+1] -= fvy; acc[3*j+2] -= fvz
 
 	@staticmethod
 	@jit(nopython=True)
@@ -816,9 +823,6 @@ class Elastic:
 		l : ndarray
 			The rest length of each bond. Different from network lists if it is a
 			learning degree of freedom.
-		k : ndarray
-			The stiffness of each bond. Different from network lists if it is a
-			learning degree of freedom.
 		jacx : ndarray
 			The jacobian subblock to populate.
 		jacv : ndarray
@@ -831,66 +835,118 @@ class Elastic:
 
 		edge_i, edge_j, edge_k, edge_l, edge_t = network
 		for e,(i, j) in enumerate(zip(edge_i, edge_j)):
-			xi, yi = q[2*i], q[2*i+1]
-			xj, yj = q[2*j], q[2*j+1]
-			vxi, vyi = q[2*i+2*n], q[2*i+1+2*n]
-			vxj, vyj = q[2*j+2*n], q[2*j+1+2*n]
-			dx = xi-xj; dy = yi-yj
-			dvx = vxi-vxj; dvy = vyi-vyj
-			xvdot = dx*dvx + dy*dvy
-			r2 = dx**2 + dy**2
+			xi, yi, zi = q[3*i], q[3*i+1], q[3*i+2]
+			xj, yj, zj = q[3*j], q[3*j+1], q[3*j+2]
+			vxi, vyi, vzi = q[3*i+3*n], q[3*i+1+3*n], q[3*i+2+3*n]
+			vxj, vyj, vzj = q[3*j+3*n], q[3*j+1+3*n], q[3*j+2+3*n]
+			dx = xi-xj; dy = yi-yj; dz = zi-zj
+			dvx = vxi-vxj; dvy = vyi-vyj; dvz = vzi-vzj
+			xvdot = dx*dvx + dy*dvy + dz*dvz
+			r2 = dx**2 + dy**2 + dz**2
 			r = np.sqrt(r2)
 			r3 = r*r2
 
 			xx = -b*l[e]/r3*(2*dx*dvx-xvdot*(3*dx*dx/r2-1))
 			yy = -b*l[e]/r3*(2*dy*dvy-xvdot*(3*dy*dy/r2-1))
+			zz = -b*l[e]/r3*(2*dz*dvz-xvdot*(3*dz*dz/r2-1))
 			xy = -b*l[e]/r3*(dx*dvy+dy*dvx-3*xvdot*dx*dy/r2)
+			xz = -b*l[e]/r3*(dx*dvz+dz*dvx-3*xvdot*dx*dz/r2)
+			yz = -b*l[e]/r3*(dy*dvz+dz*dvy-3*xvdot*dy*dz/r2)
 
 			vxx = -b*(l[e]/r*(dx*dx/r2-1)+1)
 			vyy = -b*(l[e]/r*(dy*dy/r2-1)+1)
+			vzz = -b*(l[e]/r*(dz*dz/r2-1)+1)
 			vxy = -b*l[e]*dx*dy/r3
+			vxz = -b*l[e]*dx*dz/r3
+			vyz = -b*l[e]*dy*dz/r3
 			
-			jacx[2*i,2*i] += xx # xixi
-			jacx[2*i+1,2*i+1] += yy # yiyi
-			jacx[2*i,2*i+1] += xy # xiyi
-			jacx[2*i+1,2*i] += xy # yixi
+			jacx[3*i,3*i] += xx # xixi
+			jacx[3*i+1,3*i+1] += yy # yiyi
+			jacx[3*i+2,3*i+2] += zz # zizi
+			jacx[3*i,3*i+1] += xy # xiyi
+			jacx[3*i+1,3*i] += xy # yixi
+			jacx[3*i,3*i+2] += xz # xizi
+			jacx[3*i+2,3*i] += xz # zixi
+			jacx[3*i+1,3*i+2] += yz # yizi
+			jacx[3*i+2,3*i+1] += yz # ziyi
 
-			jacx[2*j,2*j] += xx # xjxj
-			jacx[2*j+1,2*j+1] += yy # yjyj
-			jacx[2*j,2*j+1] += xy # xjyj
-			jacx[2*j+1,2*j] += xy # yjxj
+			jacx[3*j,3*j] += xx # xjxj
+			jacx[3*j+1,3*j+1] += yy # yjyj
+			jacx[3*j+2,3*j+2] += zz # zjzj
+			jacx[3*j,3*j+1] += xy # xjyj
+			jacx[3*j+1,3*j] += xy # yjxj
+			jacx[3*j,3*j+2] += xz # xjzj
+			jacx[3*j+2,3*j] += xz # zjxj
+			jacx[3*j+1,3*j+2] += yz # yjzj
+			jacx[3*j+2,3*j+1] += yz # zjyj
 
-			jacx[2*i,2*j] -= xx # xixj
-			jacx[2*j,2*i] -= xx # xjxi
-			jacx[2*i+1,2*j+1] -= yy # yiyj
-			jacx[2*j+1,2*i+1] -= yy # yjyi
-			jacx[2*i,2*j+1] -= xy # xiyj
-			jacx[2*j,2*i+1] -= xy # xjyi
-			jacx[2*i+1,2*j] -= xy # yixj
-			jacx[2*j+1,2*i] -= xy # yjxi
+			jacx[3*i,3*j] -= xx # xixj
+			jacx[3*j,3*i] -= xx # xjxi
+			jacx[3*i+1,3*j+1] -= yy # yiyj
+			jacx[3*j+1,3*i+1] -= yy # yjyi
+			jacx[3*i+2,3*j+2] -= zz # zizj
+			jacx[3*j+2,3*i+2] -= zz # zjzi
 
-			jacv[2*i,2*i] += vxx # xixi
-			jacv[2*i+1,2*i+1] += vyy # yiyi
-			jacv[2*i,2*i+1] += vxy # xiyi
-			jacv[2*i+1,2*i] += vxy # yixi
+			jacx[3*i,3*j+1] -= xy # xiyj
+			jacx[3*j,3*i+1] -= xy # xjyi
+			jacx[3*i+1,3*j] -= xy # yixj
+			jacx[3*j+1,3*i] -= xy # yjxi
 
-			jacv[2*j,2*j] += vxx # xjxj
-			jacv[2*j+1,2*j+1] += vyy # yjyj
-			jacv[2*j,2*j+1] += vxy # xjyj
-			jacv[2*j+1,2*j] += vxy # yjxj
+			jacx[3*i,3*j+2] -= xz # xizj
+			jacx[3*j,3*i+2] -= xz # xjzi
+			jacx[3*i+2,3*j] -= xz # zixj
+			jacx[3*j+2,3*i] -= xz # zjxi
 
-			jacv[2*i,2*j] -= vxx # xixj
-			jacv[2*j,2*i] -= vxx # xjxi
-			jacv[2*i+1,2*j+1] -= vyy # yiyj
-			jacv[2*j+1,2*i+1] -= vyy # yjyi
-			jacv[2*i,2*j+1] -= vxy # xiyj
-			jacv[2*j,2*i+1] -= vxy # xjyi
-			jacv[2*i+1,2*j] -= vxy # yixj
-			jacv[2*j+1,2*i] -= vxy # yjxi
+			jacx[3*i+1,3*j+2] -= yz # yizj
+			jacx[3*j+1,3*i+2] -= yz # yjzi
+			jacx[3*i+2,3*j+1] -= yz # ziyj
+			jacx[3*j+2,3*i+1] -= yz # zjyi
+
+			jacv[3*i,3*i] += vxx # xixi
+			jacv[3*i+1,3*i+1] += vyy # yiyi
+			jacv[3*i+2,3*i+2] += vzz # zizi
+			jacv[3*i,3*i+1] += vxy # xiyi
+			jacv[3*i+1,3*i] += vxy # yixi
+			jacv[3*i,3*i+2] += vxz # xizi
+			jacv[3*i+2,3*i] += vxz # zixi
+			jacv[3*i+1,3*i+2] += vyz # yizi
+			jacv[3*i+2,3*i+1] += vyz # ziyi
+
+			jacv[3*j,3*j] += vxx # xjxj
+			jacv[3*j+1,3*j+1] += vyy # yjyj
+			jacv[3*j+2,3*j+2] += vzz # zjzj
+			jacv[3*j,3*j+1] += vxy # xjyj
+			jacv[3*j+1,3*j] += vxy # yjxj
+			jacv[3*j,3*j+2] += vxz # xjzj
+			jacv[3*j+2,3*j] += vxz # zjxj
+			jacv[3*j+1,3*j+2] += vyz # yjzj
+			jacv[3*j+2,3*j+1] += vyz # zjyj
+
+			jacv[3*i,3*j] -= vxx # xixj
+			jacv[3*j,3*i] -= vxx # xjxi
+			jacv[3*i+1,3*j+1] -= vyy # yiyj
+			jacv[3*j+1,3*i+1] -= vyy # yjyi
+			jacv[3*i+2,3*j+2] -= vzz # zizj
+			jacv[3*j+2,3*i+2] -= vzz # zjzi
+
+			jacv[3*i,3*j+1] -= vxy # xiyj
+			jacv[3*j,3*i+1] -= vxy # xjyi
+			jacv[3*i+1,3*j] -= vxy # yixj
+			jacv[3*j+1,3*i] -= vxy # yjxi
+
+			jacv[3*i,3*j+2] -= vxz # xizj
+			jacv[3*j,3*i+2] -= vxz # xjzi
+			jacv[3*i+2,3*j] -= vxz # zixj
+			jacv[3*j+2,3*i] -= vxz # zjxi
+
+			jacv[3*i+1,3*j+2] -= vyz # yizj
+			jacv[3*j+1,3*i+2] -= vyz # yjzi
+			jacv[3*i+2,3*j+1] -= vyz # ziyj
+			jacv[3*j+2,3*i+1] -= vyz # zjyi
 
 	@staticmethod
 	@jit(nopython=True)
-	def _length_update_learning(t, n, q, _q, l, dl, eta, alpha, network):
+	def _length_update_learning(t, n, q, q_c, l, dl, eta, alpha, network):
 		'''Apply an update to edge rest lengths using coupled learning.
 		
 		Parameters
@@ -900,8 +956,8 @@ class Elastic:
 		n : int
 			The number of nodes.
 		q : ndarray
-			The positions of the nodes in the free state.
-		_q : ndarray
+			The positions of the nodes in the source clamp only state.
+		q_c : ndarray
 			The positions of the nodes in the clamped state.
 		l : ndarray
 			The rest length of each bond.
@@ -919,25 +975,25 @@ class Elastic:
 		for e, (i, j, k, train) in enumerate(zip(edge_i, edge_j, edge_k, edge_t)):
 			if train:
 				# free state
-				xi, yi = q[2*i], q[2*i+1]
-				xj, yj = q[2*j], q[2*j+1]
-				dx = xi-xj; dy = yi-yj
-				r = np.sqrt(dx**2 + dy**2)
+				xi, yi, zi = q[3*i], q[3*i+1], q[3*i+2]
+				xj, yj, zj = q[3*j], q[3*j+1], q[3*j+2]
+				dx = xi-xj; dy = yi-yj; dz = zi-zj
+				r = np.sqrt(dx**2 + dy**2 + dz**2)
 
 				# clamped state
-				_xi, _yi = _q[2*i], _q[2*i+1]
-				_xj, _yj = _q[2*j], _q[2*j+1]
-				_dx = _xi-_xj; _dy = _yi-_yj
-				_r = np.sqrt(_dx**2 + _dy**2)
+				xi_c, yi_c, zi_c = q_c[3*i], q_c[3*i+1], q_c[3*i+2]
+				xj_c, yj_c, zj_c = q_c[3*j], q_c[3*j+1], q_c[3*j+2]
+				dx_c = xi_c-xj_c; dy_c = yi_c-yj_c; dz_c = zi_c-zj_c
+				r_c = np.sqrt(dx_c**2 + dy_c**2 + dz_c**2)
 
 				if l[e] > 0:
-					dl[e] = alpha/eta*k*((r-l[e])-(_r-l[e]))
+					dl[e] = alpha/eta*k*((r-l[e])-(r_c-l[e]))
 				else:
 					l[e] = dl[e] = 0.
 
 	@staticmethod
 	@jit(nopython=True)
-	def _length_update_aging(t, n, q, _q, l, dl, eta, alpha, network):
+	def _length_update_aging(t, n, q, q_c, l, dl, eta, alpha, network):
 		'''Apply an update to edge rest lengths using directed aging.
 		
 		Parameters
@@ -947,8 +1003,8 @@ class Elastic:
 		n : int
 			The number of nodes.
 		q : ndarray
-			The positions of the nodes in the free state.
-		_q : ndarray
+			The positions of the nodes in the source only clamped state.
+		q_c : ndarray
 			The positions of the nodes in the clamped state.
 		l : ndarray
 			The rest length of each bond.
@@ -966,18 +1022,18 @@ class Elastic:
 		for e, (i, j, k, train) in enumerate(zip(edge_i, edge_j, edge_k, edge_t)):
 			if train:
 				# clamped state
-				_xi, _yi = _q[2*i], _q[2*i+1]
-				_xj, _yj = _q[2*j], _q[2*j+1]
-				_dx = _xi-_xj; _dy = _yi-_yj
-				_r = np.sqrt(_dx**2 + _dy**2)
+				xi_c, yi_c, zi_c = q_c[3*i], q_c[3*i+1], q_c[3*i+2]
+				xj_c, yj_c, zj_c = q_c[3*j], q_c[3*j+1], q_c[3*j+2]
+				dx_c = xi_c-xj_c; dy_c = yi_c-yj_c; dz_c = zi_c-zj_c
+				r_c = np.sqrt(dx_c**2 + dy_c**2 + dz_c**2)
 				if l[e] > 0:
-					dl[e] = alpha/eta*k*(_r-l[e])
+					dl[e] = alpha/eta*k*(r_c-l[e])
 				else:
 					l[e] = dl[e] = 0.
 
 	@staticmethod
 	@jit(nopython=True)
-	def _stiffness_update_learning(t, n, q, _q, k, dk, eta, alpha, network):
+	def _stiffness_update_learning(t, n, q, q_c, k, dk, eta, alpha, network):
 		'''Apply an update to edge stiffnesses using coupled learning.
 		
 		Parameters
@@ -987,8 +1043,8 @@ class Elastic:
 		n : int
 			The number of nodes.
 		q : ndarray
-			The positions of the nodes in the free state.
-		_q : ndarray
+			The positions of the nodes in the source only clamped state.
+		q_c : ndarray
 			The positions of the nodes in the clamped state.
 		k : ndarray
 			The stiffness of each bond.
@@ -1006,25 +1062,25 @@ class Elastic:
 		for e, (i, j, l, train) in enumerate(zip(edge_i, edge_j, edge_l, edge_t)):
 			if train:
 				# free state
-				xi, yi = q[2*i], q[2*i+1]
-				xj, yj = q[2*j], q[2*j+1]
-				dx = xi-xj; dy = yi-yj
-				r = np.sqrt(dx**2 + dy**2)
+				xi, yi, zi = q[3*i], q[3*i+1], q[3*i+2]
+				xj, yj, zj = q[3*j], q[3*j+1], q[3*j+2]
+				dx = xi-xj; dy = yi-yj; dz = zi-zj
+				r = np.sqrt(dx**2 + dy**2 + dz**2)
 
 				# clamped state
-				_xi, _yi = _q[2*i], _q[2*i+1]
-				_xj, _yj = _q[2*j], _q[2*j+1]
-				_dx = _xi-_xj; _dy = _yi-_yj
-				_r = np.sqrt(_dx**2 + _dy**2)
+				xi_c, yi_c, zi_c = q_c[3*i], q_c[3*i+1], q_c[3*i+2]
+				xj_c, yj_c, zj_c = q_c[3*j], q_c[3*j+1], q_c[3*j+2]
+				dx_c = xi_c-xj_c; dy_c = yi_c-yj_c; dz_c = zi_c-zj_c
+				r_c = np.sqrt(dx_c**2 + dy_c**2 + dz_c**2)
 
 				if k[e] > 0:
-					dk[e] = 0.5*alpha/eta*((r-l)**2-(_r-l)**2)
+					dk[e] = 0.5*alpha/eta*((r-l)**2-(r_c-l)**2)
 				else:
 					k[e] = dk[e] = 0.
 
 	@staticmethod
 	@jit(nopython=True)
-	def _stiffness_update_aging(t, n, q, _q, k, dk, eta, alpha, network):
+	def _stiffness_update_aging(t, n, q, q_c, k, dk, eta, alpha, network):
 		'''Apply an update to edge stiffnesses using directed aging.
 		
 		Parameters
@@ -1034,8 +1090,8 @@ class Elastic:
 		n : int
 			The number of nodes.
 		q : ndarray
-			The positions of the nodes in the free state.
-		_q : ndarray
+			The positions of the nodes in the source only clamped state.
+		q_c : ndarray
 			The positions of the nodes in the clamped state.
 		k : ndarray
 			The stiffness of each bond.
@@ -1053,13 +1109,13 @@ class Elastic:
 		for e, (i, j, l, train) in enumerate(zip(edge_i, edge_j, edge_l, edge_t)):
 			if train:
 				# clamped state
-				_xi, _yi = _q[2*i], _q[2*i+1]
-				_xj, _yj = _q[2*j], _q[2*j+1]
-				_dx = _xi-_xj; _dy = _yi-_yj
-				_r = np.sqrt(_dx**2 + _dy**2)
+				xi_c, yi_c, zi_c = q_c[3*i], q_c[3*i+1], q_c[3*i+2]
+				xj_c, yj_c, zj_c = q_c[3*j], q_c[3*j+1], q_c[3*j+2]
+				dx_c = xi_c-xj_c; dy_c = yi_c-yj_c; dz_c = zi_c-zj_c
+				r_c = np.sqrt(dx_c**2 + dy_c**2 + dz_c**2)
 
 				if k[e] > 0:
-					dk[e] = -alpha/eta*k[e]*(_r-l)**2
+					dk[e] = -alpha/eta*k[e]*(r_c-l)**2
 				else:
 					k[e] = dk[e] = 0.
 
@@ -1143,11 +1199,12 @@ class Elastic:
 		self.reset_init()
 		
 		t = 0
-		hess = np.zeros((2*self.n,2*self.n))
-		q = np.hstack([self.pts.ravel(),np.zeros(2*self.n)])
-		mask = np.zeros(2*self.n, dtype=bool)
-		mask[::2] = self.degree > 0
-		mask[1::2] = self.degree > 0
+		hess = np.zeros((3*self.n,3*self.n))
+		q = np.hstack([self.pts.ravel(),np.zeros(3*self.n)])
+		mask = np.zeros(3*self.n, dtype=bool)
+		mask[::3] = self.degree > 0
+		mask[1::3] = self.degree > 0
+		mask[2::3] = self.degree > 0
 
 		edge_i, edge_j, edge_k, edge_l, edge_t = self._edge_lists()
 		network = (edge_i, edge_j, edge_k, edge_l, edge_t)
@@ -1177,7 +1234,7 @@ class Elastic:
 			traj[i] = a @ R
 		return traj
 
-	def mean_square_displacement(self, min_degree=1):
+	def mean_square_displacement(self, nodes=None):
 		'''Compute the mean square displacement of the nodes over time.
 
 		This routine first removes rigid rotations and translations relative to the first frame,
@@ -1186,15 +1243,17 @@ class Elastic:
 
 		Parameters
 		----------
-		min_degree : int, optional
-			Only include particles with a minimum degree set by min_degree. Default is 1,
-			which includes all connected particles.
+		nodes : int, optional
+			Only include the node indices provided in the MSD. If None (default), include
+			all nodes in the calculation.
 
 		Returns
 		-------
 		float
 			The mean square displacement.
 		'''
+		if nodes is None:
+			nodes = np.arange(self.n).astype(int)
 
 		# remove rigid rotations and translations relative to first frame
 		traj = self.rigid_correction()
@@ -1204,8 +1263,8 @@ class Elastic:
 		disp = traj - p_avg
 		# mean square displacement for each particle (average over time)
 		msd = np.mean(np.square(np.linalg.norm(disp, axis=2)), axis=0)
-		# mean square displacement over all particles with at least min_degree
-		l_ms = np.mean(msd[self.degree>=min_degree])
+		# mean square displacement over all particles in nodes.
+		l_ms = np.mean(msd[nodes])
 		return l_ms
 
 	'''
@@ -1255,13 +1314,114 @@ class Elastic:
 			Array storing the endpoints of each edge.
 		'''
 
-		edges = np.zeros((len(self.graph.edges()),2,2))
+		edges = np.zeros((len(self.graph.edges()),2,3))
 		for i,edge in enumerate(self.graph.edges()):
 			edges[i,0,:] = self.pts[edge[0]]
 			edges[i,1,:] = self.pts[edge[1]]
 		return edges
 
+	def rotate_view(self, R):
+		'''Redefine the perspective for 3D visualization.
+		
+		Parameters
+		----------
+		R : float or ndarray
+			If float, rotation angle about z-axis in radians.
+			If ndarray, a 3D rotation matrix.
+		'''
+
+		if not hasattr(R, '__len__'): R = np.array([[np.cos(R),-np.sin(R),0],
+													[np.sin(R),np.cos(R),0],
+													[0,0,1]])
+		self._povray_props['light1'] = R @ self._povray_props['light1']
+		self._povray_props['light2'] = R @ self._povray_props['light2']
+		self._povray_props['camera'] = R @ self._povray_props['camera']
+
+	def reset_view(self):
+		'''Reset the 3D view orientation.'''
+		self._povray_props = {'light1':np.array([-10,10,10]),
+							  'light2':np.array([10,10,10]),
+							  'camera':np.array([0,0.75,0.25])}
+
+	def _povray_setup(self, R=np.eye(3)):
+		bg = Background("color", [1.0,1.0,1.0])
+		l1pos = R @ self._povray_props['light1']
+		l2pos = R @ self._povray_props['light2']
+		cpos = R @ self._povray_props['camera']
+
+		#lights = [LightSource(l1pos, 'color', 'rgb <0.7,0.65,0.65>',
+		#					  'area_light', [10,0,0], [0,10,0], 5, 5,
+		#					  'adaptive', 1, 'jitter'),
+		#		  LightSource(l2pos, 'color', 'rgb <0.7,0.65,0.65>',
+		#					  'area_light', [10,0,0], [0,10,0], 5, 5,
+		#					  'adaptive', 1, 'jitter')]
+		lights = [LightSource(l1pos, 'color', 'rgb <0.7,0.65,0.65>'),
+				  LightSource(l2pos, 'color', 'rgb <0.7,0.65,0.65>')]
+		camera = Camera('location', cpos, 'sky', 'z', 'look_at', [0,0,0])
+		return bg, lights, camera
+
+	def _povray_spheres(self, nodes):
+		spheres = [0 for _ in range(len(nodes))]
+		c = 'rgb<0.3,0.4,0.5>'
+		r = 2*self.params['radius']
+		for i,node in enumerate(nodes):
+			spheres[i] = Sphere(self.pts[node], r,
+						 Texture(Pigment('color',c),
+						 Finish('ambient',0.24,'diffuse',0.88,
+						 'specular',0.1,'phong',0.2,'phong_size',5)))
+		return spheres
+
+	def _povray_edges(self, pairs):
+		edges = [0 for _ in range(len(pairs))]
+		c = 'rgb<0.3,0.4,0.5>'
+		r = self.params['radius']
+		for i,pair in enumerate(pairs):
+			edges[i] = Cylinder(self.pts[pair[0]], self.pts[pair[1]], r,
+						   Texture(Pigment('color',c),
+						   Finish('ambient',0.24,'diffuse',0.88,
+						   'specular',0.1,'phong',0.2,'phong_size',5)))
+		return edges
+
+	def _povray_hull(self):
+		hull = ConvexHull(self.pts)
+		hull_pts = sorted(list(set([i for simplex in hull.simplices for i in simplex])))
+		simplices = [0 for _ in range(2*len(hull.simplices))]
+		for s,simplex in enumerate(hull.simplices):
+			i, j, k = simplex
+			simplices[2*s] = [hull_pts.index(i),hull_pts.index(j),hull_pts.index(k)]
+
+		c = 'rgb<0.65,0.6,0.85>'
+		hull = Mesh2(VertexVectors(len(hull_pts), *[self.pts[i] for i in hull_pts]),
+					 TextureList(1, Texture(Pigment('color',c,'transmit',0.7),
+									Finish('ambient',0.24,'diffuse',0.88,
+									'specular',0.1,'phong',0.2,'phong_size',5))),
+					 FaceIndices(len(simplices)//2, *[simplex for simplex in simplices]))
+		return hull
+
+
+	def _povray_color_edges(self, pairs, colors, alphas):
+		edges = [0 for _ in range(len(pairs))]
+		r = self.params['radius']
+		for i,pair in enumerate(pairs):
+			edges[i] = Cylinder(self.pts[pair[0]], self.pts[pair[1]], r,
+						   Texture(Pigment('color', colors[i], 'transmit', 1-alphas[i]),
+						   Finish('ambient',0.24,'diffuse',0.88,
+						   'specular',0.1,'phong',0.2,'phong_size',5)))
+		return edges
+
 	def plot_network(self, ax):
+		'''Plot the network.
+
+		Parameters
+		----------
+		ax : matplotlib.axes.Axes
+			The axes on which to plot.
+		'''
+
+		if self.dim == 2: return self._plot_network_2d(ax)
+		else: return self._plot_network_3d(ax)
+
+	def _plot_network_2d(self, ax):
 		'''Plot the network.
 
 		Parameters
@@ -1279,13 +1439,32 @@ class Elastic:
 		'''
 
 		e = self._collect_edges()
-		ec = mc.LineCollection(e, colors='k', linewidths=1)
+		ec = mc.LineCollection(e[:,:,:self.dim], colors='k', linewidths=1)
 		ax.add_collection(ec)
 
 		r = 2*self.params['radius']*np.ones(self.n)[self.degree>0]
-		dc = mc.EllipseCollection(r, r, np.zeros_like(r), offsets=self.pts[self.degree>0],
+		dc = mc.EllipseCollection(r, r, np.zeros_like(r), offsets=self.pts[self.degree>0,:self.dim],
 									  transOffset=ax.transData, units='x',
 									  edgecolor='k', facecolor='k', linewidths=0.5)
 		ax.add_collection(dc)
 		return ec, dc
+
+	def _plot_network_3d(self, ax):
+		'''Plot the network.
+
+		Parameters
+		----------
+		ax : matplotlib.axes.Axes
+			The axes on which to plot.
+
+		Returns
+		-------
+		spheres : list of vapory.Sphere objects
+			Nodes to plot.
+		edges : list of vapory.Cylinder objects
+			Network edges to plot.
+		'''
+		return self._povray_spheres(np.arange(self.n).astype(int)), self._povray_edges(self.graph.edges())
+
+
 

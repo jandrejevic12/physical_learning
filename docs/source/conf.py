@@ -19,6 +19,7 @@ extensions = [
 	'sphinx.ext.intersphinx',
 	'sphinx.ext.napoleon',
 	'nbsphinx',
+	'sphinx_gallery.load_style',
 ]
 
 intersphinx_mapping = {
@@ -56,7 +57,7 @@ def setup(app):
 	MOCK_MODULES = ['numpy', 'scipy', 'scipy.integrate', 'scipy.spatial', 'scipy.linalg', 'cmocean', 'networkx',
 			'numba', 'pandas', 'poisson_disc', 'skimage', 'sklearn', 'tqdm',
 			'matplotlib', 'matplotlib.pyplot', 'matplotlib.collections', 'matplotlib.animation', 'matplotlib.ticker',
-			'plot_imports']
+			'vapory', 'plot_imports']
 
 	for mod_name in MOCK_MODULES:
 		sys.modules[mod_name] = mock.Mock()

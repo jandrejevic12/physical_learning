@@ -3,7 +3,7 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  -python>=3.8
+  - python>=3.8
   - cmocean=2.0
   - matplotlib=3.5.1
   - networkx=2.7.1
@@ -17,3 +17,4 @@ dependencies:
   - tqdm=4.64.0
   - pip:
     - poisson-disc==0.2.1
+    - vapory==0.1.2
