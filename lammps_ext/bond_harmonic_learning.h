@@ -39,7 +39,7 @@ class BondHarmonicLearning : public Bond {
   void *extract(const char *, int &) override;
 
  protected:
-  double *k, *r0, *e_t, *eta, *alpha; // stiffness, rest length, target strain, learning rates
+  double *k, *r0, *e_t, *eta, *alpha, *vmin; // stiffness, rest length, target strain, learning rates, minimum value for dof
   int *train, *mode, *phase, *target; // train trainable bond indicator, training mode, phase, target bond indicator
 
   virtual void allocate();

@@ -43,6 +43,7 @@ BondHarmonicLearning::~BondHarmonicLearning()
     memory->destroy(e_t);
     memory->destroy(eta);
     memory->destroy(alpha);
+    memory->destroy(vmin);
     memory->destroy(train);
     memory->destroy(mode);
     memory->destroy(phase);
@@ -175,7 +176,7 @@ void BondHarmonicLearning::compute(int eflag, int vflag)
         k[type] += dk;
       }
 
-      if (k[type] < 0) k[type] = 0.0;
+      if (k[type] < vmin[type]) k[type] = vmin[type];
 
     }
   }
@@ -193,6 +194,7 @@ void BondHarmonicLearning::allocate()
   memory->create(e_t, np1, "bond:e_t");
   memory->create(eta, np1, "bond:eta");
   memory->create(alpha, np1, "bond:alpha");
+  memory->create(vmin, np1, "bond:vmin");
   memory->create(train, np1, "bond:train");
   memory->create(mode, np1, "bond:mode");
   memory->create(phase, np1, "bond:phase");
@@ -208,7 +210,7 @@ void BondHarmonicLearning::allocate()
 
 void BondHarmonicLearning::coeff(int narg, char **arg)
 {
-  if (narg != 10) error->all(FLERR, "Incorrect args for bond coefficients");
+  if (narg != 11) error->all(FLERR, "Incorrect args for bond coefficients");
   if (!allocated) allocate();
 
   int ilo, ihi;
@@ -219,11 +221,12 @@ void BondHarmonicLearning::coeff(int narg, char **arg)
   double e_t_one = utils::numeric(FLERR, arg[3], false, lmp);
   double eta_one = utils::numeric(FLERR, arg[4], false, lmp);
   double alpha_one = utils::numeric(FLERR, arg[5], false, lmp);
+  double vmin_one = utils::numeric(FLERR, arg[6], false, lmp);
 
-  int train_one = utils::inumeric(FLERR, arg[6], false, lmp);
-  int mode_one = utils::inumeric(FLERR, arg[7], false, lmp);
-  int phase_one = utils::inumeric(FLERR, arg[8], false, lmp);
-  int target_one = utils::inumeric(FLERR, arg[9], false, lmp);
+  int train_one = utils::inumeric(FLERR, arg[7], false, lmp);
+  int mode_one = utils::inumeric(FLERR, arg[8], false, lmp);
+  int phase_one = utils::inumeric(FLERR, arg[9], false, lmp);
+  int target_one = utils::inumeric(FLERR, arg[10], false, lmp);
 
   int count = 0;
   for (int i = ilo; i <= ihi; i++) {
@@ -232,6 +235,7 @@ void BondHarmonicLearning::coeff(int narg, char **arg)
     e_t[i] = e_t_one;
     eta[i] = eta_one;
     alpha[i] = alpha_one;
+    vmin[i] = vmin_one;
     train[i] = train_one;
     mode[i] = mode_one;
     phase[i] = phase_one;
@@ -263,6 +267,7 @@ void BondHarmonicLearning::write_restart(FILE *fp)
   fwrite(&e_t[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&eta[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&alpha[1], sizeof(double), atom->nbondtypes, fp);
+  fwrite(&vmin[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&train[1], sizeof(int), atom->nbondtypes, fp);
   fwrite(&mode[1], sizeof(int), atom->nbondtypes, fp);
   fwrite(&phase[1], sizeof(int), atom->nbondtypes, fp);
@@ -283,6 +288,7 @@ void BondHarmonicLearning::read_restart(FILE *fp)
     utils::sfread(FLERR, &e_t[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &eta[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &alpha[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
+    utils::sfread(FLERR, &vmin[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &train[1], sizeof(int), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &mode[1], sizeof(int), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &phase[1], sizeof(int), atom->nbondtypes, fp, nullptr, error);
@@ -293,6 +299,7 @@ void BondHarmonicLearning::read_restart(FILE *fp)
   MPI_Bcast(&e_t[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&eta[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&alpha[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
+  MPI_Bcast(&vmin[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&train[1], atom->nbondtypes, MPI_INT, 0, world);
   MPI_Bcast(&mode[1], atom->nbondtypes, MPI_INT, 0, world);
   MPI_Bcast(&phase[1], atom->nbondtypes, MPI_INT, 0, world);
@@ -307,7 +314,7 @@ void BondHarmonicLearning::read_restart(FILE *fp)
 
 void BondHarmonicLearning::write_data(FILE *fp)
 {
-  for (int i = 1; i <= atom->nbondtypes; i++) fprintf(fp, "%d %.15g %.15g %.15g %.15g %.15g %d %d %d %d\n", i, k[i], r0[i], e_t[i], eta[i], alpha[i], train[i], mode[i], phase[i], target[i]);
+  for (int i = 1; i <= atom->nbondtypes; i++) fprintf(fp, "%d %.15g %.15g %.15g %.15g %.15g %.15g %d %d %d %d\n", i, k[i], r0[i], e_t[i], eta[i], alpha[i], vmin[i], train[i], mode[i], phase[i], target[i]);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -346,6 +353,7 @@ void *BondHarmonicLearning::extract(const char *str, int &dim)
   if (strcmp(str, "e_t") == 0) return (void *) e_t;
   if (strcmp(str, "eta") == 0) return (void *) eta;
   if (strcmp(str, "alpha") == 0) return (void *) alpha;
+  if (strcmp(str, "vmin") == 0) return (void *) vmin;
   if (strcmp(str, "train") == 0) return (void *) train;
   if (strcmp(str, "mode") == 0) return (void *) mode;
   if (strcmp(str, "phase") == 0) return (void *) phase;
