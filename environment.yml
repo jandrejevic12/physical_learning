@@ -7,7 +7,7 @@ dependencies:
   - cmocean=2.0
   - matplotlib=3.5.1
   - networkx=2.7.1
-  - notebook=6.4.11
+  - notebook>=6.4.11
   - numba=0.53.1
   - numpy=1.22.3
   - pandas=1.4.3

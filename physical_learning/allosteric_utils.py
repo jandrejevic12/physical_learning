@@ -203,9 +203,9 @@ class Allosteric(Elastic):
 		'''
 
 		# Identify edge points using Voronoi tessellation.
-		vor, tri, bound_pairs = self._find_boundary_pairs()
+		vor, tri, bound_pairs, interior_pairs = self._find_boundary_pairs()
 
-		if len(bound_pairs) < 2:
+		if (len(bound_pairs) < 1) or (len(interior_pairs) < 1):
 			print("Unable to find suitable source and target; switching to manual mode.")
 			self._pick_source_target()
 
@@ -214,6 +214,18 @@ class Allosteric(Elastic):
 			se = np.random.randint(len(bound_pairs))
 			si = bound_pairs[se][0]
 			sj = bound_pairs[se][1]
+
+			'''
+			# eliminate any overlapping pairs
+			for i in range(len(interior_pairs)-1,-1,-1):
+				if interior_pairs[i][0] == si or interior_pairs[i][0] == sj \
+				or interior_pairs[i][1] == si or interior_pairs[i][1] == sj:
+					interior_pairs.pop(i)
+
+			if len(interior_pairs) < 1:
+				print("Unable to find suitable source and target; switching to manual mode.")
+				self._pick_source_target()
+			'''
 
 			# eliminate any overlapping pairs
 			for i in range(len(bound_pairs)-1,-1,-1):
@@ -231,7 +243,10 @@ class Allosteric(Elastic):
 				# bound pair nodes.
 				ti = bound_pairs[0][0]
 				tj = bound_pairs[0][1]
+				#ti = interior_pairs[0][0]
+				#tj = interior_pairs[0][1]
 				dmax = 0
+				#for p in interior_pairs:
 				for p in bound_pairs:
 					dii = nx.shortest_path_length(self.graph,si,p[0])
 					dij = nx.shortest_path_length(self.graph,si,p[1])
@@ -270,7 +285,10 @@ class Allosteric(Elastic):
 	def _find_boundary_pairs(self):
 		'''Identify node pairs on the boundary of the network.'''
 
-		min_degree = self.dim+1 # This will vary by dimensionality.
+		if self.dim == 2:
+			min_degree = self.dim+1
+		else:
+			min_degree = self.dim+2
 
 		# Construct Voronoi diagram.
 		vor = Voronoi(self.pts_init[:,:self.dim])
@@ -303,7 +321,27 @@ class Allosteric(Elastic):
 
 		print(len(bound_pairs))
 
-		return vor, tri, bound_pairs
+		# next, identify inside pairs one layer in.
+		_, _, bound_nodes = self._find_boundary_nodes()
+		interior_nodes = []
+		for node in bound_nodes:
+			for edge in self.graph.edges(node):
+				if edge[1] not in bound_nodes:
+					interior_nodes += [edge[1]]
+
+		interior_pairs = []
+		for nodes in vor.ridge_points:
+			p1, p2 = nodes
+			if (p1 in interior_nodes) and (p2 in interior_nodes):
+				interior_pairs += [[p1, p2]]
+			
+		interior_pairs = [[p[0],p[1]] for p in interior_pairs
+					   if (not self.graph.has_edge(p[0],p[1]) and self.graph.degree(p[0]) >= min_degree
+					   and self.graph.degree(p[1]) >=min_degree)
+					   or (self.graph.has_edge(p[0],p[1]) and self.graph.degree(p[0]) >= min_degree+1
+					   and self.graph.degree(p[1]) >=min_degree+1)]
+
+		return vor, tri, bound_pairs, interior_pairs
 
 	def _find_boundary_nodes(self):
 		# Construct Voronoi diagram.
@@ -1294,6 +1332,7 @@ class Allosteric(Elastic):
 		def step(i):
 			print("Rendering frame {:d}/{:d}".format(i+1,frames+1), end="\r")
 			self.set_frame(i*skip)
+			spheres = []; edges = []; hull = []
 			if spine:
 				spheres = self._povray_spheres(nodes)
 				edges = self._povray_edges(pairs)
@@ -1545,6 +1584,8 @@ class Allosteric(Elastic):
 			es_max = np.max(np.abs(es))
 			if es_max > emax:
 				emax = es_max
+		if np.abs(es0) > emax:
+			emax = np.abs(es0)
 
 		ax2.axhline(et0, color=pal['red'], lw=1.5, label='training strain')
 		for target in self.targets:
@@ -1553,6 +1594,8 @@ class Allosteric(Elastic):
 			et_max = np.max(np.abs(et))
 			if et_max > emax:
 				emax = et_max
+		if np.abs(et0) > emax:
+			emax = np.abs(et0)
 
 		ax2.set_xlabel('time')
 		ax1.set_ylabel('strain')
@@ -1657,24 +1700,24 @@ class Allosteric(Elastic):
 			else:
 
 				e = self._collect_edges()
-				eci = mc.LineCollection(e, colors=[0.6,0.6,0.6], linewidths=0.5, linestyle='dashed')
+				eci = mc.LineCollection(e[:,:,:self.dim], colors=[0.6,0.6,0.6], linewidths=0.5, linestyle='dashed')
 				ax.add_collection(eci)
 
 				v = vs[:,mode]
-				self.pts[:,0][self.degree>0] += scale*v[::2]/fac
-				self.pts[:,1][self.degree>0] += scale*v[1::2]/fac
+				self.pts[:,0][self.degree>0] += scale*v[::3]/fac
+				self.pts[:,1][self.degree>0] += scale*v[1::3]/fac
 
-				col = np.arctan2(v[1::2], v[::2])
+				col = np.arctan2(v[1::3], v[::3])
 				col[col<0] += np.pi
 				norm = mpl.colors.Normalize(vmin=0, vmax=np.pi)
-				r = scale*np.sqrt(v[::2]**2+v[1::2]**2)/fac
+				r = scale*np.sqrt(v[::3]**2+v[1::3]**2)/fac
 				dc = mc.EllipseCollection(r, r, np.zeros_like(r), offsets=self.pts[self.degree>0,:self.dim],
 											  transOffset=ax.transData, units='x',
 											  edgecolor='k', facecolor=cyclic_cmap(norm(col)), linewidths=0.5, zorder=100)
 				ax.add_collection(dc)
 
 				e = self._collect_edges()
-				ec = mc.LineCollection(e, colors='k', linewidths=0.5)
+				ec = mc.LineCollection(e[:,:,:self.dim], colors='k', linewidths=0.5)
 				ax.add_collection(ec)
 
 				self.reset_init()
@@ -1759,6 +1802,10 @@ class Allosteric(Elastic):
 		else: ns = 0
 		if np.abs(et) > 0: nt = len(self.targets)
 		else: nt = 0
+
+		xmax = np.max(np.abs(self.pts[:,0]))
+		ymax = np.max(np.abs(self.pts[:,1]))
+		zmax = np.max(np.abs(self.pts[:,2]))
 		
 		with open(filename, 'w') as f:
 			f.write('{:s}\n\n'.format(title))
@@ -1773,10 +1820,10 @@ class Allosteric(Elastic):
 			f.write('1 atom types\n')
 			f.write('{:d} bond types\n\n'.format(nb))
 
-			f.write('{:.15g} {:.15g} xlo xhi\n'.format(2*np.min(self.pts[:,0]),2*np.max(self.pts[:,0])))
-			f.write('{:.15g} {:.15g} ylo yhi\n\n'.format(2*np.min(self.pts[:,1]),2*np.max(self.pts[:,1])))
+			f.write('{:.15g} {:.15g} xlo xhi\n'.format(-2*xmax,2*xmax))
+			f.write('{:.15g} {:.15g} ylo yhi\n\n'.format(-2*ymax,2*ymax))
 			if self.dim == 3:
-				f.write('{:.15g} {:.15g} zlo zhi\n\n'.format(2*np.min(self.pts[:,2]),2*np.max(self.pts[:,2])))
+				f.write('{:.15g} {:.15g} zlo zhi\n\n'.format(-2*zmax,2*zmax))
 
 			f.write('Masses\n\n')
 			f.write('1 1\n\n')
@@ -1797,7 +1844,12 @@ class Allosteric(Elastic):
 
 			f.write('Atoms\n\n')
 			for i in range(self.n):
-				f.write('{:d} 1 1 {:.4g} {:.4g} {:.4g}\n'.format(i+1,self.pts[i,0],self.pts[i,1],self.pts[i,2]))
+				f.write('{:d} 1 1 {:.15g} {:.15g} {:.15g}\n'.format(i+1,self.pts[i,0],self.pts[i,1],self.pts[i,2]))
+			f.write('\n')
+
+			f.write('Velocities\n\n')
+			for i in range(self.n):
+				f.write('{:d} {:.15g} {:.15g} {:.15g}\n'.format(i+1,self.vel[i,0],self.vel[i,1],self.vel[i,2]))
 			f.write('\n')
 
 			f.write('Bonds\n\n')
@@ -1813,7 +1865,7 @@ class Allosteric(Elastic):
 					f.write('{:d} {:d} {:d} {:d}\n'.format(e+1,e+1,target['i']+1,target['j']+1))
 					e += 1
 
-	def write_lammps_data_learning(self, filename, title, applied_args, train=2, method='learning', eta=1e-1, alpha=1e-3, dt=0.005):
+	def write_lammps_data_learning(self, filename, title, applied_args, train=2, method='learning', eta=1e-1, alpha=1e-3, vmin=1e-3, dt=0.005):
 		'''Write the datafile of atoms and bonds for a LAMMPS simulation with custom coupled learning routine.
 		
 		Parameters
@@ -1832,6 +1884,8 @@ class Allosteric(Elastic):
 			The learning rate by which the clamped state target strain approaches the final desired strain.
 		alpha : float, optional
 			The aging rate.
+		vmin : float, optional
+			The smallest allowed value for each learning degree of freedom.
 		dt : float, optional
 			Integration step size.
 		'''
@@ -1846,6 +1900,10 @@ class Allosteric(Elastic):
 
 		if method == 'aging': mode = 1
 		else: mode = 2
+
+		xmax = np.max(np.abs(self.pts[:,0]))
+		ymax = np.max(np.abs(self.pts[:,1]))
+		zmax = np.max(np.abs(self.pts[:,2]))
 		
 		with open(filename, 'w') as f:
 			f.write('{:s}\n\n'.format(title))
@@ -1860,35 +1918,41 @@ class Allosteric(Elastic):
 			f.write('1 atom types\n')
 			f.write('{:d} bond types\n\n'.format(nb))
 
-			f.write('{:.15g} {:.15g} xlo xhi\n'.format(2*np.min(self.pts[:,0]),2*np.max(self.pts[:,0])))
-			f.write('{:.15g} {:.15g} ylo yhi\n\n'.format(2*np.min(self.pts[:,1]),2*np.max(self.pts[:,1])))
+			f.write('{:.15g} {:.15g} xlo xhi\n'.format(-2*xmax,2*xmax))
+			f.write('{:.15g} {:.15g} ylo yhi\n\n'.format(-2*ymax,2*ymax))
 			if self.dim == 3:
-				f.write('{:.15g} {:.15g} zlo zhi\n\n'.format(2*np.min(self.pts[:,2]),2*np.max(self.pts[:,2])))
+				f.write('{:.15g} {:.15g} zlo zhi\n\n'.format(-2*zmax,2*zmax))
 
 			f.write('Masses\n\n')
 			f.write('1 1\n\n')
 
 			f.write('Bond Coeffs\n\n')
 			for e,edge in enumerate(self.graph.edges(data=True)):
-				f.write('{:d} {:.15g} {:.15g} {:.15g} {:.15g} {:.15g} {:d} {:d} {:d} {:d}\n'.format(e+1,0.5*edge[2]['stiffness'],edge[2]['length'],0,eta,alpha*dt,train*int(edge[2]['trainable']),mode,1,0))
+				f.write('{:d} {:.15g} {:.15g} {:.15g} {:.15g} {:.15g} {:.15g} {:d} {:d} {:d} {:d}\n'.format(e+1,0.5*edge[2]['stiffness'],edge[2]['length'],0,eta,alpha*dt,0.5*vmin,train*int(edge[2]['trainable']),mode,1,0))
 			e = self.ne		
 
 			for es, source in zip(ess, self.sources):
 				if np.abs(es) > 0:
 					rs = source['length']*(1 + source['phase']*es)
-					f.write('{:d} {:.15g} {:.15g} {:.15g} {:.15g} {:.15g} {:d} {:d} {:d} {:d}\n'.format(e+1,0.5*ka,rs,0,eta,alpha*dt,0,0,1,0))
+					f.write('{:d} {:.15g} {:.15g} {:.15g} {:.15g} {:.15g} {:.15g} {:d} {:d} {:d} {:d}\n'.format(e+1,0.5*ka,rs,0,eta,alpha*dt,0.5*vmin,0,0,1,0))
 					e += 1
 			for et, target in zip(ets, self.targets):
 				if np.abs(et) > 0:
 					rt = target['length']
-					f.write('{:d} {:.15g} {:.15g} {:.15g} {:.15g} {:.15g} {:d} {:d} {:d} {:d}\n'.format(e+1,0.5*ka,rt,et,eta,alpha*dt,0,0,target['phase'],1))
+					f.write('{:d} {:.15g} {:.15g} {:.15g} {:.15g} {:.15g} {:.15g} {:d} {:d} {:d} {:d}\n'.format(e+1,0.5*ka,rt,et,eta,alpha*dt,0.5*vmin,0,0,target['phase'],1))
 					e += 1
 			f.write('\n')
 
 			f.write('Atoms\n\n')
 			for i in range(self.n):
 				f.write('{:d} 1 1 {:.15g} {:.15g} {:.15g}\n'.format(2*i+1,self.pts[i,0],self.pts[i,1],self.pts[i,2])) # clamped
-				f.write('{:d} 1 1 {:.15g} {:.15g} {:.15g}\n'.format(2*i+2,self.pts[i,0],self.pts[i,1],self.pts[i,2])) # free
+				f.write('{:d} 1 1 {:.15g} {:.15g} {:.15g}\n'.format(2*i+2,self.pts_c[i,0],self.pts_c[i,1],self.pts_c[i,2])) # free
+			f.write('\n')
+
+			f.write('Velocities\n\n')
+			for i in range(self.n):
+				f.write('{:d} {:.15g} {:.15g} {:.15g}\n'.format(2*i+1,self.vel[i,0],self.vel[i,1],self.vel[i,2])) # clamped
+				f.write('{:d} {:.15g} {:.15g} {:.15g}\n'.format(2*i+2,self.vel_c[i,0],self.vel_c[i,1],self.vel_c[i,2])) # free
 			f.write('\n')
 
 			f.write('Bonds\n\n')
@@ -1953,6 +2017,8 @@ class Allosteric(Elastic):
 				f.write('bond_style 		harmonic/learning\n\n')
 
 			f.write('read_data			{:s}\n\n'.format(datafile))
+			if temp > 0:
+				f.write('velocity			all create {:.15g} 12 dist gaussian mom yes rot yes sum no\n\n'.format(temp))
 
 			f.write('variable 			duration equal {:12g}/dt\n'.format(duration))
 			f.write('variable			frames equal {:d}\n'.format(frames))
@@ -1960,14 +2026,17 @@ class Allosteric(Elastic):
 
 			if temp > 0:
 				f.write('fix				therm all langevin {:.15g} {:.15g} $(100.0*dt) 12 zero yes\n'.format(temp,temp))
-			f.write('fix				intgr all nve\n')
+				f.write('fix				intgr all nve\n')
+				#f.write('fix				therm all nvt temp {:.15g} {:.15g} $(100.0*dt)\n'.format(temp,temp))
+			
 			if temp == 0:
+				f.write('fix				intgr all nve\n')
 				f.write('fix			drag all viscous 2\n')
 			if self.dim == 2:
 				f.write('fix				dim all enforce2d\n')
 
-			f.write('dump				out all xyz ${step}'+' {:s}\n'.format(dumpfile))
-			f.write('dump_modify		out format line "%.15g %.15g %.15g"\n')
+			f.write('dump				out all custom ${step}'+' {:s} x y z vx vy vz\n'.format(dumpfile))
+			f.write('dump_modify		out format line "%.15g %.15g %.15g %.15g %.15g %.15g"\n')
 			f.write('thermo_style    	custom step time temp press vol pe ke\n')
 			f.write('thermo          	${step}\n')
 			f.write('neigh_modify		once yes\n')

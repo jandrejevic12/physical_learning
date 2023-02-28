@@ -49,7 +49,9 @@ class Elastic(object):
 	ne : int
 		Number of edges in the network.
 	pts : ndarray
-		(x,y) coordinates for each node in the system.
+		position coordinates for each node in the system.
+	vel : ndarray
+		velocities for each node in the system.
 	degree : ndarray
 		The degree (number of neighbors) of each node.
 	Z : float
@@ -60,6 +62,8 @@ class Elastic(object):
 		for isostaticity.
 	traj : ndarray
 		The simulated trajectory of the network produced after a call to the solve() routine.
+	vtraj : ndarray
+		The simulated set of velocities produced after a call to the solve() routine.
 	t_eval : ndarray
 		The corresponding time at each simulated frame.
 	'''
@@ -83,6 +87,7 @@ class Elastic(object):
 		# set network node positions and elastic properties
 		self.n = len(self.graph.nodes())
 		self.pts = np.zeros((self.n,3))
+		self.vel = np.zeros((self.n,3))
 		for i in range(self.n):
 			self.pts[i,:] = self.graph.nodes[i]['pos']
 		self._set_attributes()
@@ -134,12 +139,14 @@ class Elastic(object):
 		'''Reset the network to its initial, relaxed state.'''
 
 		self.pts = np.copy(self.pts_init)
+		self.pts_c = np.copy(self.pts_init)
 
 	def reset_equilibrium(self):
 		'''Set the current network state to its equilibrium state.'''
 
 		# reset equilibrium node positions
 		self.pts_init = np.copy(self.pts)
+		self.vel *= 0.
 		
 		# reset edge rest lengths
 		for edge in self.graph.edges(data=True):
@@ -224,7 +231,7 @@ class Elastic(object):
 	*****************************************************************************************************
 	'''
 
-	def solve(self, duration, frames, T, applied_args, train=0, method='learning', eta=1., alpha=1e-3, pbar=True):	
+	def solve(self, duration, frames, T, applied_args, train=0, method='learning', eta=1., alpha=1e-3, vmin=1e-3, pbar=True):	
 		'''Numerically integrate the elastic network in time.
 
 		This routine ptionally trains edge stiffnesses or rest lengths using directed aging or
@@ -253,6 +260,8 @@ class Elastic(object):
 			corresponds to pinning directly at the target.
 		alpha : float, optional
 			Aging rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
+		vmin : float, optional
+			The smallest allowed value for each learning degree of freedom. Default is 1e-3.
 		pbar : bool, optional
 			Whether to display a progress bar. Default is True. 
 		'''
@@ -283,31 +292,35 @@ class Elastic(object):
 					  bar_format='{l_bar}{bar}| {n:.2f}/{total:.2f} [{elapsed}<{remaining}]', desc='progress') as self.pbar:
 				if train:
 					sol = solve_ivp(self._ff, t_span, q, t_eval=self.t_eval,
-									args=(T, network, applied_args, train, method, eta, alpha, pbar),
+									args=(T, network, applied_args, train, method, eta, alpha, vmin, pbar),
 									method='RK23')
 				else:
 					sol = solve_ivp(self._ff, t_span, q, t_eval=self.t_eval, jac=self._jj,
-									args=(T, network, applied_args, train, method, eta, alpha, pbar),
+									args=(T, network, applied_args, train, method, eta, alpha, vmin, pbar),
 									method='BDF')
 
 		else:
 			if train:
 				sol = solve_ivp(self._ff, t_span, q, t_eval=self.t_eval,
-								args=(T, network, applied_args, train, method, eta, alpha, pbar),
+								args=(T, network, applied_args, train, method, eta, alpha, vmin, pbar),
 								method='RK23')
 			else:
 				sol = solve_ivp(self._ff, t_span, q, t_eval=self.t_eval, jac=self._jj,
-								args=(T, network, applied_args, train, method, eta, alpha, pbar),
+								args=(T, network, applied_args, train, method, eta, alpha, vmin, pbar),
 								method='BDF')
 
 
 		q = sol.y.T
 		self.traj = np.copy(q[:,:3*n].reshape(frames+1, n, 3))
+		self.vtraj = np.copy(q[:,3*n:6*n].reshape(frames+1, n, 3))
 		self.pts = np.copy(self.traj[-1])
+		self.vel = np.copy(self.vtraj[-1])
 
 		if train:
 			self.traj_c = np.copy(q[:,6*n:9*n].reshape(frames+1, n, 3))
+			self.vtraj_c = np.copy(q[:,9*n:12*n].reshape(frames+1, n, 3))
 			self.pts_c = np.copy(self.traj_c[-1])
+			self.vel_c = np.copy(self.vtraj_c[-1])
 
 			if train == 1:
 				edge_l = q[-1,12*n:]
@@ -317,6 +330,12 @@ class Elastic(object):
 				edge_k = q[-1,12*n:]
 				for e, edge in enumerate(self.graph.edges(data=True)):
 					edge[2]['stiffness'] = edge_k[e]
+
+		else:
+			self.pts_c = np.copy(self.pts)
+			self.vel_c = np.copy(self.vel)
+			self.traj_c = np.copy(self.traj)
+			self.vtraj_c = np.copy(self.vtraj)
 
 	def _edge_lists(self):
 		'''Copy edge properties stored in networkx object into numpy arrays for easy access.
@@ -371,6 +390,7 @@ class Elastic(object):
 			- eta: Learning rate by which to increment applied strain towards the target. Default is 1, which
 			  corresponds to pinning directly at the target.
 			- alpha: Aging rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
+			- vmin: The smallest allowed value for each learning degree of freedom.
 			- pbar: Whether to display a progress bar. Default is True. 
 
 		Returns
@@ -379,7 +399,7 @@ class Elastic(object):
 			Total energy of the network.
 		'''
 
-		T, network, applied_args, train, method, eta, alpha, pbar = args
+		T, network, applied_args, train, method, eta, alpha, vmin, pbar = args
 		edge_i, edge_j, edge_k, edge_l, edge_t = network
 		n = self.n
 
@@ -424,6 +444,7 @@ class Elastic(object):
 			- eta: Learning rate by which to increment applied strain towards the target. Default is 1, which
 			  corresponds to pinning directly at the target.
 			- alpha: Aging rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
+			- vmin: The smallest allowed value for each learning degree of freedom.
 			- pbar: Whether to display a progress bar. Default is True. 
 
 		Returns
@@ -432,7 +453,7 @@ class Elastic(object):
 			Derivative of the degrees of freedom.
 		'''
 
-		T, network, applied_args, train, method, eta, alpha, pbar = args
+		T, network, applied_args, train, method, eta, alpha, vmin, pbar = args
 		edge_i, edge_j, edge_k, edge_l, edge_t = network
 		n = self.n
 
@@ -450,9 +471,9 @@ class Elastic(object):
 				dl = fun[12*n:]
 
 				if method == 'learning':
-					self._length_update_learning(t, n, q, q_c, l, dl, eta, alpha, network)
+					self._length_update_learning(t, n, q, q_c, l, dl, eta, alpha, vmin, network)
 				else:
-					self._length_update_aging(t, n, q, q_c, l, dl, eta, alpha, network)
+					self._length_update_aging(t, n, q, q_c, l, dl, eta, alpha, vmin, network)
 				
 			else:
 				l = edge_l
@@ -460,9 +481,9 @@ class Elastic(object):
 				dk = fun[12*n:]
 
 				if method == 'learning':
-					self._stiffness_update_learning(t, n, q, q_c, k, dk, eta, alpha, network)
+					self._stiffness_update_learning(t, n, q, q_c, k, dk, eta, alpha, vmin, network)
 				else:
-					self._stiffness_update_aging(t, n, q, q_c, k, dk, eta, alpha, network)
+					self._stiffness_update_aging(t, n, q, q_c, k, dk, eta, alpha, vmin, network)
 		else:
 			l = edge_l
 			k = edge_k
@@ -516,6 +537,7 @@ class Elastic(object):
 			- eta: Learning rate by which to increment applied strain towards the target. Default is 1, which
 			  corresponds to pinning directly at the target.
 			- alpha: Aging rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
+			- vmin: The smallest allowed value for each learning degree of freedom.
 			- pbar: Whether to display a progress bar. Default is True. 
 
 		Returns
@@ -526,7 +548,7 @@ class Elastic(object):
 
 		# Note: this method is only used when training is off. So, auxiliary networks are not used.
 
-		T, network, applied_args, train, method, eta, alpha, pbar = args
+		T, network, applied_args, train, method, eta, alpha, vmin, pbar = args
 		edge_i, edge_j, edge_k, edge_l, edge_t = network
 		n = self.n
 
@@ -946,7 +968,7 @@ class Elastic(object):
 
 	@staticmethod
 	@jit(nopython=True)
-	def _length_update_learning(t, n, q, q_c, l, dl, eta, alpha, network):
+	def _length_update_learning(t, n, q, q_c, l, dl, eta, alpha, lmin, network):
 		'''Apply an update to edge rest lengths using coupled learning.
 		
 		Parameters
@@ -967,6 +989,8 @@ class Elastic(object):
 			The learning rate.
 		alpha : float
 			The aging rate.
+		lmin : float
+			The minimum allowed rest length.
 		network : tuple of ndarrays
 			Network edge properties obtained from _edge_lists().
 		'''
@@ -985,15 +1009,15 @@ class Elastic(object):
 				xj_c, yj_c, zj_c = q_c[3*j], q_c[3*j+1], q_c[3*j+2]
 				dx_c = xi_c-xj_c; dy_c = yi_c-yj_c; dz_c = zi_c-zj_c
 				r_c = np.sqrt(dx_c**2 + dy_c**2 + dz_c**2)
+				dl[e] = alpha/eta*k*((r-l[e])-(r_c-l[e]))
 
-				if l[e] > 0:
-					dl[e] = alpha/eta*k*((r-l[e])-(r_c-l[e]))
-				else:
-					l[e] = dl[e] = 0.
+				if (l[e] <= lmin) and (dl[e] < 0):
+					l[e] = lmin
+					dl[e] = 0
 
 	@staticmethod
 	@jit(nopython=True)
-	def _length_update_aging(t, n, q, q_c, l, dl, eta, alpha, network):
+	def _length_update_aging(t, n, q, q_c, l, dl, eta, alpha, lmin, network):
 		'''Apply an update to edge rest lengths using directed aging.
 		
 		Parameters
@@ -1014,6 +1038,8 @@ class Elastic(object):
 			The learning rate.
 		alpha : float
 			The aging rate.
+		lmin : float
+			The minimum allowed rest length.
 		network : tuple of ndarrays
 			Network edge properties obtained from _edge_lists().
 		'''
@@ -1026,14 +1052,15 @@ class Elastic(object):
 				xj_c, yj_c, zj_c = q_c[3*j], q_c[3*j+1], q_c[3*j+2]
 				dx_c = xi_c-xj_c; dy_c = yi_c-yj_c; dz_c = zi_c-zj_c
 				r_c = np.sqrt(dx_c**2 + dy_c**2 + dz_c**2)
-				if l[e] > 0:
-					dl[e] = alpha/eta*k*(r_c-l[e])
-				else:
-					l[e] = dl[e] = 0.
+				dl[e] = alpha/eta*k*(r_c-l[e])
+				
+				if (l[e] <= lmin) and (dl[e] < 0):
+					l[e] = lmin
+					dl[e] = 0
 
 	@staticmethod
 	@jit(nopython=True)
-	def _stiffness_update_learning(t, n, q, q_c, k, dk, eta, alpha, network):
+	def _stiffness_update_learning(t, n, q, q_c, k, dk, eta, alpha, kmin, network):
 		'''Apply an update to edge stiffnesses using coupled learning.
 		
 		Parameters
@@ -1054,6 +1081,8 @@ class Elastic(object):
 			The learning rate.
 		alpha : float
 			The aging rate.
+		kmin : float
+			The minimum allowed stiffness.
 		network : tuple of ndarrays
 			Network edge properties obtained from _edge_lists().
 		'''
@@ -1072,15 +1101,15 @@ class Elastic(object):
 				xj_c, yj_c, zj_c = q_c[3*j], q_c[3*j+1], q_c[3*j+2]
 				dx_c = xi_c-xj_c; dy_c = yi_c-yj_c; dz_c = zi_c-zj_c
 				r_c = np.sqrt(dx_c**2 + dy_c**2 + dz_c**2)
-
-				if k[e] > 0:
-					dk[e] = 0.5*alpha/eta*((r-l)**2-(r_c-l)**2)
-				else:
-					k[e] = dk[e] = 0.
+				dk[e] = 0.5*alpha/eta*((r-l)**2-(r_c-l)**2)
+				
+				if (k[e] <= kmin) and (dk[e] < 0):
+					k[e] = kmin
+					dk[e] = 0
 
 	@staticmethod
 	@jit(nopython=True)
-	def _stiffness_update_aging(t, n, q, q_c, k, dk, eta, alpha, network):
+	def _stiffness_update_aging(t, n, q, q_c, k, dk, eta, alpha, kmin, network):
 		'''Apply an update to edge stiffnesses using directed aging.
 		
 		Parameters
@@ -1101,6 +1130,8 @@ class Elastic(object):
 			The learning rate.
 		alpha : float
 			The aging rate.
+		kmin : float
+			The minimum allowed stiffness.
 		network : tuple of ndarrays
 			Network edge properties obtained from _edge_lists().
 		'''
@@ -1113,11 +1144,11 @@ class Elastic(object):
 				xj_c, yj_c, zj_c = q_c[3*j], q_c[3*j+1], q_c[3*j+2]
 				dx_c = xi_c-xj_c; dy_c = yi_c-yj_c; dz_c = zi_c-zj_c
 				r_c = np.sqrt(dx_c**2 + dy_c**2 + dz_c**2)
-
-				if k[e] > 0:
-					dk[e] = -alpha/eta*k[e]*(r_c-l)**2
-				else:
-					k[e] = dk[e] = 0.
+				dk[e] = -alpha/eta*k[e]*(r_c-l)**2
+				
+				if (k[e] <= kmin) and (dk[e] < 0):
+					k[e] = kmin
+					dk[e] = 0
 
 	def _sine_pulse(self, t, T):
 		'''A sine pulse in time.
@@ -1185,9 +1216,13 @@ class Elastic(object):
 	*****************************************************************************************************
 	'''
 
-	def compute_modes(self):
+	def compute_modes(self, applied_args=None):
 		'''Compute the normal modes of the elastic network at equilibrium.
 
+		Parameters
+		----------
+		applied_args : tuple, optional
+			Arguments for applied forces. If None, no applied force is added.
 		Returns
 		-------
 		evals : ndarray
@@ -1196,8 +1231,6 @@ class Elastic(object):
 			Unit eigenvectors stored in each column.
 		'''
 
-		self.reset_init()
-		
 		t = 0
 		hess = np.zeros((3*self.n,3*self.n))
 		q = np.hstack([self.pts.ravel(),np.zeros(3*self.n)])
@@ -1210,6 +1243,8 @@ class Elastic(object):
 		network = (edge_i, edge_j, edge_k, edge_l, edge_t)
 
 		self._elastic_jacobian(t, self.n, q, edge_l, edge_k, hess, network)
+		if applied_args is not None:
+			self._applied_jacobian(t, self.n, q, hess, 0, applied_args)
 
 		hess = hess[mask]
 		hess = hess.T[mask].T
@@ -1290,6 +1325,9 @@ class Elastic(object):
 		if fr < 0 or fr > frames:
 			raise ValueError("Invalid frame number: Select frame from 0 to {:d}.".format(frames))
 		self.pts = self.traj[fr]
+		self.vel = self.vtraj[fr]
+		self.pts_c = self.traj_c[fr]
+		self.vel_c = self.vtraj_c[fr]
 
 	def set_axes(self, ax):
 		'''Set up axis limits based on extent of network.

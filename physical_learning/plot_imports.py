@@ -1,13 +1,4 @@
 import numpy as np
-
-from matplotlib import rc
-try:
-    rc('font',**{'family':'serif','serif':['Palatino']})
-    rc('text', usetex=True)
-    rc('text.latex', preamble=[r'\usepackage{amsmath}'])
-except:
-    pass
-
 import matplotlib as mpl
 import matplotlib.ticker as mticker
 import cmocean
