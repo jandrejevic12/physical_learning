@@ -193,12 +193,11 @@ class Elastic(object):
 			The name of the text file to write.
 		'''
 
-		self.reset_init()
 		with open(filename, 'w') as f:
 			f.write(str(self.dim)+'\n')
 			f.write(str(self.n)+'\n')
 			for i in range(self.n):
-				f.write('{:.15g} {:.15g} {:.15g}\n'.format(self.pts[i,0],self.pts[i,1],self.pts[i,2]))
+				f.write('{:.15g} {:.15g} {:.15g}\n'.format(self.pts_init[i,0],self.pts_init[i,1],self.pts_init[i,2]))
 			f.write(str(len(self.graph.edges()))+'\n')
 			for edge in self.graph.edges(data=True):
 				f.write('{:d} {:d} {:.15g} {:.15g} {:d}\n'.format(edge[0],edge[1],edge[2]['stiffness'], edge[2]['length'], edge['trainable']))

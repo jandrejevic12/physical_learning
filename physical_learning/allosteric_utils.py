@@ -587,14 +587,13 @@ class Allosteric(Elastic):
 			The name of the text file to write.
 		'''
 
-		self.reset_init()
 		with open(filename, 'w') as f:
 			# write dimension
 			f.write(str(self.dim)+'\n')
 			# write nodes
 			f.write(str(self.n)+'\n')
 			for i in range(self.n):
-				f.write('{:.15g} {:.15g} {:.15g}\n'.format(self.pts[i,0],self.pts[i,1],self.pts[i,2]))
+				f.write('{:.15g} {:.15g} {:.15g}\n'.format(self.pts_init[i,0],self.pts_init[i,1],self.pts_init[i,2]))
 
 			# write edges
 			f.write(str(len(self.graph.edges()))+'\n')
