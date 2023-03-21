@@ -262,7 +262,7 @@ class Packing:
 		self.tp = ti
 		with tqdm(total=tf-ti, unit='sim. time', initial=ti, ascii=True, 
 				  bar_format='{l_bar}{bar}| {n:.2f}/{total:.2f} [{elapsed}<{remaining}]', desc='progress') as self.pbar:
-			sol = solve_ivp(self._ff, t_span, q, t_eval=self.t_eval, jac=self._jj, method='BDF')
+			sol = solve_ivp(self._ff, t_span, q, t_eval=self.t_eval, jac=self._jj, method='LSODA')
 
 		q = sol.y.T[:,:3*self.n]
 		self.traj = q.reshape(frames+1, self.n, 3)

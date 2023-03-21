@@ -89,6 +89,9 @@ class Allosteric(Elastic):
 		if (dim != 2) and (dim != 3):
 			raise ValueError("Dimension must be 2 or 3.")
 
+		if dim == 3:
+			auto = True # must select automatically
+			
 		self.seed = seed
 		self.sources = []
 		self.targets = []
@@ -714,10 +717,8 @@ class Allosteric(Elastic):
 				else:
 					self._applied_strain_force(t, n, q, acc, (i, j, et, k, l0, phase, T))
 
-	def _applied_jacobian(self, t, n, q, dfdx, T, applied_args):
+	def _applied_jacobian(self, t, n, q, q_c, dfdx, dfdx_c, dfdx_f, T, applied_args, train, eta):
 		'''Compute the jacobian of the applied force at the source(s) and target(s).
-
-		This routine is only used when train=0.
 		
 		Parameters
 		----------
@@ -745,12 +746,23 @@ class Allosteric(Elastic):
 		for es, source in zip(ess, self.sources):
 			if np.abs(es) > 0:
 				i, j, l0, phase = source['i'], source['j'], source['length'], source['phase']
-				self._applied_strain_jacobian(t, n, q, dfdx, (i, j, es, k, l0, phase, T))
+				if train:
+					self._applied_strain_jacobian(t, n, q, dfdx, (i, j, es, k, l0, phase, T))
+					self._applied_strain_jacobian(t, n, q_c, dfdx_c, (i, j, es, k, l0, phase, T))
+				else:
+					self._applied_strain_jacobian(t, n, q, dfdx, (i, j, es, k, l0, phase, T))
 
 		for et, target in zip(ets, self.targets):
 			if np.abs(et) > 0:
 				i, j, l0, phase = target['i'], target['j'], target['length'], target['phase']
-				self._applied_strain_jacobian(t, n, q, dfdx, (i, j, et, k, l0, phase, T))
+				if train:
+					l = np.sqrt((q[3*i]-q[3*j])**2+(q[3*i+1]-q[3*j+1])**2+(q[3*i+2]-q[3*j+2])**2)
+					ef = (l - l0)/l0
+					ec = ef + eta*(et - ef)
+					self._applied_strain_jacobian(t, n, q_c, dfdx_c, (i, j, ec, k, l0, phase, T))
+					self._nudge_coupling_jacobian(t, n, q, q_c, dfdx_f, (i, j, ec, k, l0, phase, T), eta)
+				else:
+					self._applied_strain_jacobian(t, n, q, dfdx, (i, j, et, k, l0, phase, T))
 
 	def _applied_strain_energy(self, t, n, q, args):
 		'''Compute the elastic energy due to applied force for a single node pair.
@@ -899,6 +911,101 @@ class Allosteric(Elastic):
 		jac[3*j+1,3*i+2] -= yz # yjzi
 		jac[3*i+2,3*j+1] -= yz # ziyj
 		jac[3*j+2,3*i+1] -= yz # zjyi
+
+	def _nudge_coupling_jacobian(self, t, n, q, q_c, jac, args, eta):
+		'''Jacobian for the coupling between the free and clamped targets.
+		
+		Parameters
+		----------
+		t : float
+			The current time.
+		n : int
+			The total number of nodes in the system (free or clamped).
+		q : ndarray
+			The position coordinates of the nodes in the free state.
+		q_c : ndarray
+			The position coordinates of the nodes in the clamped state.
+		jac : ndarray
+			The jacobian of the forces, added into this array as output.
+		args : tuple
+			Applied force parameters: the node indices on which to apply the force,
+			the amount of strain, the applied spring stiffness, rest length, phase,
+			and period T.
+		eta : float
+			The nudge factor.
+		'''
+
+		i, j, eps, k, l0, phase, T = args
+		if T > 0:
+			p = phase/2*(1-self._cosine_pulse(t,T))
+		else:
+			p = phase
+		
+		# free state
+		xi, yi, zi = q[3*i], q[3*i+1], q[3*i+2]
+		xj, yj, zj = q[3*j], q[3*j+1], q[3*j+2]
+		dx = xi-xj; dy = yi-yj; dz = zi-zj
+		r = np.sqrt(dx**2 + dy**2 + dz**2)
+
+		# clamped state
+		xi_c, yi_c, zi_c = q_c[3*i], q_c[3*i+1], q_c[3*i+2]
+		xj_c, yj_c, zj_c = q_c[3*j], q_c[3*j+1], q_c[3*j+2]
+		dx_c = xi_c-xj_c; dy_c = yi_c-yj_c; dz_c = zi_c-zj_c
+		r_c = np.sqrt(dx_c**2 + dy_c**2 + dz_c**2)
+
+		fac = p*k*(1-eta)/r_c/r
+
+		xx = fac*dx_c*dx
+		yy = fac*dy_c*dy
+		zz = fac*dz_c*dz
+		xy = fac*dx_c*dy
+		yx = fac*dy_c*dx
+		xz = fac*dx_c*dz
+		zx = fac*dz_c*dx
+		yz = fac*dy_c*dz
+		zy = fac*dz_c*dy
+
+		jac[3*i,3*i] += xx # xixi
+		jac[3*i+1,3*i+1] += yy # yiyi
+		jac[3*i+2,3*i+2] += zz # zizi
+		jac[3*i,3*i+1] += xy # xiyi
+		jac[3*i+1,3*i] += yx # yixi
+		jac[3*i,3*i+2] += xz # xizi
+		jac[3*i+2,3*i] += zx # zixi
+		jac[3*i+1,3*i+2] += yz # yizi
+		jac[3*i+2,3*i+1] += zy # ziyi
+
+		jac[3*j,3*j] += xx # xjxj
+		jac[3*j+1,3*j+1] += yy # yjyj
+		jac[3*j+2,3*j+2] += zz # zjzj
+		jac[3*j,3*j+1] += xy # xjyj
+		jac[3*j+1,3*j] += yx # yjxj
+		jac[3*j,3*j+2] += xz # xjzj
+		jac[3*j+2,3*j] += zx # zjxj
+		jac[3*j+1,3*j+2] += yz # yjzj
+		jac[3*j+2,3*j+1] += zy # zjyj
+
+		jac[3*i,3*j] -= xx # xixj
+		jac[3*j,3*i] -= xx # xjxi
+		jac[3*i+1,3*j+1] -= yy # yiyj
+		jac[3*j+1,3*i+1] -= yy # yjyi
+		jac[3*i+2,3*j+2] -= zz # zizj
+		jac[3*j+2,3*i+2] -= zz # zjzi
+
+		jac[3*i,3*j+1] -= xy # xiyj
+		jac[3*j,3*i+1] -= xy # xjyi
+		jac[3*i+1,3*j] -= yx # yixj
+		jac[3*j+1,3*i] -= yx # yjxi
+
+		jac[3*i,3*j+2] -= xz # xizj
+		jac[3*j,3*i+2] -= xz # xjzi
+		jac[3*i+2,3*j] -= zx # zixj
+		jac[3*j+2,3*i] -= zx # zjxi
+
+		jac[3*i+1,3*j+2] -= yz # yizj
+		jac[3*j+1,3*i+2] -= yz # yjzi
+		jac[3*i+2,3*j+1] -= zy # ziyj
+		jac[3*j+2,3*i+1] -= zy # zjyi
 
 	'''
 	*****************************************************************************************************

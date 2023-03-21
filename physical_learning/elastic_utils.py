@@ -230,7 +230,7 @@ class Elastic(object):
 	*****************************************************************************************************
 	'''
 
-	def solve(self, duration, frames, T, applied_args, train=0, method='learning', eta=1., alpha=1e-3, vmin=1e-3, pbar=True):	
+	def solve(self, duration, frames, T, applied_args, train=0, method='learning', eta=1., alpha=1e-3, vmin=1e-3, pbar=True, integrator='LSODA'):	
 		'''Numerically integrate the elastic network in time.
 
 		This routine ptionally trains edge stiffnesses or rest lengths using directed aging or
@@ -289,24 +289,15 @@ class Elastic(object):
 		if pbar:
 			with tqdm(total=tf-ti, unit='sim. time', initial=ti, ascii=True, 
 					  bar_format='{l_bar}{bar}| {n:.2f}/{total:.2f} [{elapsed}<{remaining}]', desc='progress') as self.pbar:
-				if train:
-					sol = solve_ivp(self._ff, t_span, q, t_eval=self.t_eval,
-									args=(T, network, applied_args, train, method, eta, alpha, vmin, pbar),
-									method='RK23')
-				else:
-					sol = solve_ivp(self._ff, t_span, q, t_eval=self.t_eval, jac=self._jj,
-									args=(T, network, applied_args, train, method, eta, alpha, vmin, pbar),
-									method='BDF')
-
-		else:
-			if train:
-				sol = solve_ivp(self._ff, t_span, q, t_eval=self.t_eval,
-								args=(T, network, applied_args, train, method, eta, alpha, vmin, pbar),
-								method='RK23')
-			else:
+				
 				sol = solve_ivp(self._ff, t_span, q, t_eval=self.t_eval, jac=self._jj,
 								args=(T, network, applied_args, train, method, eta, alpha, vmin, pbar),
-								method='BDF')
+								method=integrator)
+
+		else:
+			sol = solve_ivp(self._ff, t_span, q, t_eval=self.t_eval, jac=self._jj,
+							args=(T, network, applied_args, train, method, eta, alpha, vmin, pbar),
+							method=integrator)
 
 
 		q = sol.y.T
@@ -514,8 +505,6 @@ class Elastic(object):
 	def _jj(self, t, q, *args):
 		'''Compute the jacobian of the derivative of the degrees of freedom of the spring network.
 		
-		This routine is only needed by implicit integrators, which are used when train = 0.
-		
 		Parameters
 		----------
 		t : float
@@ -545,8 +534,6 @@ class Elastic(object):
 			Jacobian of the derivative.
 		'''
 
-		# Note: this method is only used when training is off. So, auxiliary networks are not used.
-
 		T, network, applied_args, train, method, eta, alpha, vmin, pbar = args
 		edge_i, edge_j, edge_k, edge_l, edge_t = network
 		n = self.n
@@ -557,20 +544,67 @@ class Elastic(object):
 		dfdx = jac[3*n:6*n,:3*n]
 		dfdv = jac[3*n:6*n,3*n:6*n]
 
-		l = edge_l
-		k = edge_k
+		if train:
+			q_c = q[6*n:12*n]
+			for i in range(3*n):
+				jac[6*n+i,9*n+i] = 1
+			dfdx_c = jac[9*n:12*n,6*n:9*n]
+			dfdv_c = jac[9*n:12*n,9*n:12*n]
+			dfdx_f = jac[9*n:12*n,:3*n] # deriv of f_c with respect to x_f
 
+			if train == 1:
+				l = q[12*n:]
+				k = edge_k
+				dfdl = jac[3*n:6*n,12*n:]
+				dgdx = jac[12*n:,:3*n]
+				dfdl_c = jac[9*n:12*n,12*n:]
+				dgdx_c = jac[12*n:,6*n:9*n]
+				dgdl = jac[12*n:,12*n:]
+
+				if method == 'learning':
+					self._length_jacobian_learning(t, n, q, q_c, l, dfdl, dgdx, dfdl_c, dgdx_c, dgdl, eta, alpha, vmin, network)
+				else:
+					self._length_jacobian_aging(t, n, q, q_c, l, dfdl, dgdx, dfdl_c, dgdx_c, dgdl, eta, alpha, vmin, network)
+				
+			else:
+				l = edge_l
+				k = q[12*n:]
+				dfdk = jac[3*n:6*n,12*n:]
+				dgdx = jac[12*n:,:3*n]
+				dfdk_c = jac[9*n:12*n,12*n:]
+				dgdx_c = jac[12*n:,6*n:9*n]
+				dgdk = jac[12*n:,12*n:]
+
+				if method == 'learning':
+					self._stiffness_jacobian_learning(t, n, q, q_c, k, dfdk, dgdx, dfdk_c, dgdx_c, dgdk, eta, alpha, vmin, network)
+				else:
+					self._stiffness_jacobian_aging(t, n, q, q_c, k, dfdk, dgdx, dfdk_c, dgdx_c, dgdk, eta, alpha, vmin, network)
+
+		else:
+			l = edge_l
+			k = edge_k
+
+		# base network
 		self._drag_jacobian(t, n, q, dfdv, network, self.params['drag'])
 		self._dashpot_jacobian(t, n, q, l, dfdx, dfdv, network, self.params['dashpot'])
 		self._elastic_jacobian(t, n, q, l, k, dfdx, network)
-		self._applied_jacobian(t, n, q, dfdx, T, applied_args)
+
+		if train:
+			# clamped state
+			self._drag_jacobian(t, n, q_c, dfdv_c, network, self.params['drag'])
+			self._dashpot_jacobian(t, n, q_c, l, dfdx_c, dfdv_c, network, self.params['dashpot'])
+			self._elastic_jacobian(t, n, q_c, l, k, dfdx_c, network)
+
+			self._applied_jacobian(t, n, q, q_c, dfdx, dfdx_c, dfdx_f, T, applied_args, train, eta)
+		else:
+			self._applied_jacobian(t, n, q, q, dfdx, dfdx, dfdx, T, applied_args, train, eta)
 
 		return jac
 
 	def _applied_force(self, t, n, q, q_c, acc, acc_c, T, applied_args, train, eta):
 		raise NotImplementedError
 
-	def _applied_jacobian(self, t, n, q, dfdx, T, applied_args):
+	def _applied_jacobian(self, t, n, q, q_c, dfdx, dfdx_c, dfdx_f, T, applied_args, train, eta):
 		raise NotImplementedError
 
 	@staticmethod
@@ -1016,6 +1050,80 @@ class Elastic(object):
 
 	@staticmethod
 	@jit(nopython=True)
+	def _length_jacobian_learning(t, n, q, q_c, l, dfdl, dgdx, dfdl_c, dgdx_c, dgdl, eta, alpha, lmin, network):
+		'''Jacobian for edge length update.
+		
+		Parameters
+		----------
+		t : float
+			The current time.
+		n : int
+			The number of nodes.
+		q : ndarray
+			The positions of the nodes in the source clamp only state.
+		q_c : ndarray
+			The positions of the nodes in the clamped state.
+		l : ndarray
+			The rest length of each bond.
+		eta : float
+			The learning rate.
+		alpha : float
+			The aging rate.
+		lmin : float
+			The minimum allowed rest length.
+		network : tuple of ndarrays
+			Network edge properties obtained from _edge_lists().
+		'''
+
+		edge_i, edge_j, edge_k, edge_l, edge_t = network
+		for e, (i, j, k, train) in enumerate(zip(edge_i, edge_j, edge_k, edge_t)):
+			if train:
+				# free state
+				xi, yi, zi = q[3*i], q[3*i+1], q[3*i+2]
+				xj, yj, zj = q[3*j], q[3*j+1], q[3*j+2]
+				dx = xi-xj; dy = yi-yj; dz = zi-zj
+				r = np.sqrt(dx**2 + dy**2 + dz**2)
+
+				# clamped state
+				xi_c, yi_c, zi_c = q_c[3*i], q_c[3*i+1], q_c[3*i+2]
+				xj_c, yj_c, zj_c = q_c[3*j], q_c[3*j+1], q_c[3*j+2]
+				dx_c = xi_c-xj_c; dy_c = yi_c-yj_c; dz_c = zi_c-zj_c
+				r_c = np.sqrt(dx_c**2 + dy_c**2 + dz_c**2)
+
+				fac = alpha/eta*k
+
+				dgdx[e,3*i] = fac/r*dx
+				dgdx[e,3*i+1] = fac/r*dy
+				dgdx[e,3*i+2] = fac/r*dz
+				dgdx[e,3*j] = -fac/r*dx
+				dgdx[e,3*j+1] = -fac/r*dy
+				dgdx[e,3*j+2] = -fac/r*dz
+
+				dgdx_c[e,3*i] = -fac/r_c*dx_c
+				dgdx_c[e,3*i+1] = -fac/r_c*dy_c
+				dgdx_c[e,3*i+2] = -fac/r_c*dz_c
+				dgdx_c[e,3*j] = fac/r_c*dx_c
+				dgdx_c[e,3*j+1] = fac/r_c*dy_c
+				dgdx_c[e,3*j+2] = fac/r_c*dz_c
+
+				dfdl[3*i,e] = k/r*dx
+				dfdl[3*i+1,e] = k/r*dy
+				dfdl[3*i+2,e] = k/r*dz
+				dfdl[3*j,e] = -k/r*dx
+				dfdl[3*j+1,e] = -k/r*dy
+				dfdl[3*j+2,e] = -k/r*dz
+
+				dfdl_c[3*i,e] = k/r_c*dx_c
+				dfdl_c[3*i+1,e] = k/r_c*dy_c
+				dfdl_c[3*i+2,e] = k/r_c*dz_c
+				dfdl_c[3*j,e] = -k/r_c*dx_c
+				dfdl_c[3*j+1,e] = -k/r_c*dy_c
+				dfdl_c[3*j+2,e] = -k/r_c*dz_c
+
+				#dgdl[e,e] = 0
+
+	@staticmethod
+	@jit(nopython=True)
 	def _length_update_aging(t, n, q, q_c, l, dl, eta, alpha, lmin, network):
 		'''Apply an update to edge rest lengths using directed aging.
 		
@@ -1056,6 +1164,73 @@ class Elastic(object):
 				if (l[e] <= lmin) and (dl[e] < 0):
 					l[e] = lmin
 					dl[e] = 0
+
+	@staticmethod
+	@jit(nopython=True)
+	def _length_jacobian_aging(t, n, q, q_c, l, dfdl, dgdx, dfdl_c, dgdx_c, dgdl, eta, alpha, lmin, network):
+		'''Jacobian for edge length update.
+		
+		Parameters
+		----------
+		t : float
+			The current time.
+		n : int
+			The number of nodes.
+		q : ndarray
+			The positions of the nodes in the source only clamped state.
+		q_c : ndarray
+			The positions of the nodes in the clamped state.
+		l : ndarray
+			The rest length of each bond.
+		eta : float
+			The learning rate.
+		alpha : float
+			The aging rate.
+		lmin : float
+			The minimum allowed rest length.
+		network : tuple of ndarrays
+			Network edge properties obtained from _edge_lists().
+		'''
+
+		edge_i, edge_j, edge_k, edge_l, edge_t = network
+		for e, (i, j, k, train) in enumerate(zip(edge_i, edge_j, edge_k, edge_t)):
+			if train:
+				# free state
+				xi, yi, zi = q[3*i], q[3*i+1], q[3*i+2]
+				xj, yj, zj = q[3*j], q[3*j+1], q[3*j+2]
+				dx = xi-xj; dy = yi-yj; dz = zi-zj
+				r = np.sqrt(dx**2 + dy**2 + dz**2)
+
+				# clamped state
+				xi_c, yi_c, zi_c = q_c[3*i], q_c[3*i+1], q_c[3*i+2]
+				xj_c, yj_c, zj_c = q_c[3*j], q_c[3*j+1], q_c[3*j+2]
+				dx_c = xi_c-xj_c; dy_c = yi_c-yj_c; dz_c = zi_c-zj_c
+				r_c = np.sqrt(dx_c**2 + dy_c**2 + dz_c**2)
+
+				fac = alpha/eta*k
+
+				dgdx_c[e,3*i] = fac/r_c*dx_c
+				dgdx_c[e,3*i+1] = fac/r_c*dy_c
+				dgdx_c[e,3*i+2] = fac/r_c*dz_c
+				dgdx_c[e,3*j] = -fac/r_c*dx_c
+				dgdx_c[e,3*j+1] = -fac/r_c*dy_c
+				dgdx_c[e,3*j+2] = -fac/r_c*dz_c
+
+				dfdl[3*i,e] = k/r*dx
+				dfdl[3*i+1,e] = k/r*dy
+				dfdl[3*i+2,e] = k/r*dz
+				dfdl[3*j,e] = -k/r*dx
+				dfdl[3*j+1,e] = -k/r*dy
+				dfdl[3*j+2,e] = -k/r*dz
+
+				dfdl_c[3*i,e] = k/r_c*dx_c
+				dfdl_c[3*i+1,e] = k/r_c*dy_c
+				dfdl_c[3*i+2,e] = k/r_c*dz_c
+				dfdl_c[3*j,e] = -k/r_c*dx_c
+				dfdl_c[3*j+1,e] = -k/r_c*dy_c
+				dfdl_c[3*j+2,e] = -k/r_c*dz_c
+
+				dgdl[e,e] = -fac
 
 	@staticmethod
 	@jit(nopython=True)
@@ -1108,6 +1283,82 @@ class Elastic(object):
 
 	@staticmethod
 	@jit(nopython=True)
+	def _stiffness_jacobian_learning(t, n, q, q_c, k, dfdk, dgdx, dfdk_c, dgdx_c, dgdk, eta, alpha, kmin, network):
+		'''Jacobian for stiffness udpate.
+		
+		Parameters
+		----------
+		t : float
+			The current time.
+		n : int
+			The number of nodes.
+		q : ndarray
+			The positions of the nodes in the source only clamped state.
+		q_c : ndarray
+			The positions of the nodes in the clamped state.
+		k : ndarray
+			The stiffness of each bond.
+		eta : float
+			The learning rate.
+		alpha : float
+			The aging rate.
+		kmin : float
+			The minimum allowed stiffness.
+		network : tuple of ndarrays
+			Network edge properties obtained from _edge_lists().
+		'''
+
+		edge_i, edge_j, edge_k, edge_l, edge_t = network
+		for e, (i, j, l, train) in enumerate(zip(edge_i, edge_j, edge_l, edge_t)):
+			if train:
+				# free state
+				xi, yi, zi = q[3*i], q[3*i+1], q[3*i+2]
+				xj, yj, zj = q[3*j], q[3*j+1], q[3*j+2]
+				dx = xi-xj; dy = yi-yj; dz = zi-zj
+				r = np.sqrt(dx**2 + dy**2 + dz**2)
+
+				# clamped state
+				xi_c, yi_c, zi_c = q_c[3*i], q_c[3*i+1], q_c[3*i+2]
+				xj_c, yj_c, zj_c = q_c[3*j], q_c[3*j+1], q_c[3*j+2]
+				dx_c = xi_c-xj_c; dy_c = yi_c-yj_c; dz_c = zi_c-zj_c
+				r_c = np.sqrt(dx_c**2 + dy_c**2 + dz_c**2)
+				
+				fac = alpha/eta
+				rfac = (1 - l/r)
+				rfac_c = (1 - l/r_c)
+
+				dgdx[e,3*i] = fac*rfac*dx
+				dgdx[e,3*i+1] = fac*rfac*dy
+				dgdx[e,3*i+2] = fac*rfac*dz
+				dgdx[e,3*j] = -fac*rfac*dx
+				dgdx[e,3*j+1] = -fac*rfac*dy
+				dgdx[e,3*j+2] = -fac*rfac*dz
+
+				dgdx_c[e,3*i] = -fac*rfac_c*dx_c
+				dgdx_c[e,3*i+1] = -fac*rfac_c*dy_c
+				dgdx_c[e,3*i+2] = -fac*rfac_c*dz_c
+				dgdx_c[e,3*j] = fac*rfac_c*dx_c
+				dgdx_c[e,3*j+1] = fac*rfac_c*dy_c
+				dgdx_c[e,3*j+2] = fac*rfac_c*dz_c
+
+				dfdk[3*i,e] = -rfac*dx
+				dfdk[3*i+1,e] = -rfac*dy
+				dfdk[3*i+2,e] = -rfac*dz
+				dfdk[3*j,e] = rfac*dx
+				dfdk[3*j+1,e] = rfac*dy
+				dfdk[3*j+2,e] = rfac*dz
+
+				dfdk_c[3*i,e] = -rfac_c*dx_c
+				dfdk_c[3*i+1,e] = -rfac_c*dy_c
+				dfdk_c[3*i+2,e] = -rfac_c*dz_c
+				dfdk_c[3*j,e] = rfac_c*dx_c
+				dfdk_c[3*j+1,e] = rfac_c*dy_c
+				dfdk_c[3*j+2,e] = rfac_c*dz_c
+
+				#dgdk[e,e] = 0
+
+	@staticmethod
+	@jit(nopython=True)
 	def _stiffness_update_aging(t, n, q, q_c, k, dk, eta, alpha, kmin, network):
 		'''Apply an update to edge stiffnesses using directed aging.
 		
@@ -1148,6 +1399,75 @@ class Elastic(object):
 				if (k[e] <= kmin) and (dk[e] < 0):
 					k[e] = kmin
 					dk[e] = 0
+
+	@staticmethod
+	@jit(nopython=True)
+	def _stiffness_jacobian_aging(t, n, q, q_c, k, dfdk, dgdx, dfdk_c, dgdx_c, dgdk, eta, alpha, kmin, network):
+		'''Jacobian for stiffness update.
+		
+		Parameters
+		----------
+		t : float
+			The current time.
+		n : int
+			The number of nodes.
+		q : ndarray
+			The positions of the nodes in the source only clamped state.
+		q_c : ndarray
+			The positions of the nodes in the clamped state.
+		k : ndarray
+			The stiffness of each bond.
+		eta : float
+			The learning rate.
+		alpha : float
+			The aging rate.
+		kmin : float
+			The minimum allowed stiffness.
+		network : tuple of ndarrays
+			Network edge properties obtained from _edge_lists().
+		'''
+
+		edge_i, edge_j, edge_k, edge_l, edge_t = network
+		for e, (i, j, l, train) in enumerate(zip(edge_i, edge_j, edge_l, edge_t)):
+			if train:
+				# free state
+				xi, yi, zi = q[3*i], q[3*i+1], q[3*i+2]
+				xj, yj, zj = q[3*j], q[3*j+1], q[3*j+2]
+				dx = xi-xj; dy = yi-yj; dz = zi-zj
+				r = np.sqrt(dx**2 + dy**2 + dz**2)
+
+				# clamped state
+				xi_c, yi_c, zi_c = q_c[3*i], q_c[3*i+1], q_c[3*i+2]
+				xj_c, yj_c, zj_c = q_c[3*j], q_c[3*j+1], q_c[3*j+2]
+				dx_c = xi_c-xj_c; dy_c = yi_c-yj_c; dz_c = zi_c-zj_c
+				r_c = np.sqrt(dx_c**2 + dy_c**2 + dz_c**2)
+				
+				fac = 2*alpha/eta*k[e]
+				rfac = (1 - l/r)
+				rfac_c = (1 - l/r_c)
+
+				dgdx_c[e,3*i] = -fac*rfac_c*dx_c
+				dgdx_c[e,3*i+1] = -fac*rfac_c*dy_c
+				dgdx_c[e,3*i+2] = -fac*rfac_c*dz_c
+				dgdx_c[e,3*j] = fac*rfac_c*dx_c
+				dgdx_c[e,3*j+1] = fac*rfac_c*dy_c
+				dgdx_c[e,3*j+2] = fac*rfac_c*dz_c
+
+				dfdk[3*i,e] = -rfac*dx
+				dfdk[3*i+1,e] = -rfac*dy
+				dfdk[3*i+2,e] = -rfac*dz
+				dfdk[3*j,e] = rfac*dx
+				dfdk[3*j+1,e] = rfac*dy
+				dfdk[3*j+2,e] = rfac*dz
+
+				dfdk_c[3*i,e] = -rfac_c*dx_c
+				dfdk_c[3*i+1,e] = -rfac_c*dy_c
+				dfdk_c[3*i+2,e] = -rfac_c*dz_c
+				dfdk_c[3*j,e] = rfac_c*dx_c
+				dfdk_c[3*j+1,e] = rfac_c*dy_c
+				dfdk_c[3*j+2,e] = rfac_c*dz_c
+
+				dgdk[e,e] = -alpha/eta*(r_c-l)**2
 
 	def _sine_pulse(self, t, T):
 		'''A sine pulse in time.
@@ -1215,13 +1535,9 @@ class Elastic(object):
 	*****************************************************************************************************
 	'''
 
-	def compute_modes(self, applied_args=None):
+	def compute_modes(self):
 		'''Compute the normal modes of the elastic network at equilibrium.
 
-		Parameters
-		----------
-		applied_args : tuple, optional
-			Arguments for applied forces. If None, no applied force is added.
 		Returns
 		-------
 		evals : ndarray
@@ -1242,9 +1558,7 @@ class Elastic(object):
 		network = (edge_i, edge_j, edge_k, edge_l, edge_t)
 
 		self._elastic_jacobian(t, self.n, q, edge_l, edge_k, hess, network)
-		if applied_args is not None:
-			self._applied_jacobian(t, self.n, q, hess, 0, applied_args)
-
+		
 		hess = hess[mask]
 		hess = hess.T[mask].T
 
