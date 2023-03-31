@@ -352,7 +352,7 @@ class Elastic(object):
 				self.ltraj = np.tile(edge_l, (frames+1,1))
 				self.ktraj = np.tile(edge_k, (frames+1,1))
 
-			return 0
+			return sol
 
 	def _edge_lists(self):
 		'''Copy edge properties stored in networkx object into numpy arrays for easy access.
