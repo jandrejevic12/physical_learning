@@ -91,7 +91,7 @@ class Allosteric(Elastic):
 
 		if dim == 3:
 			auto = True # must select automatically
-			
+
 		self.seed = seed
 		self.sources = []
 		self.targets = []
@@ -2051,14 +2051,14 @@ class Allosteric(Elastic):
 
 			f.write('Atoms\n\n')
 			for i in range(self.n):
-				f.write('{:d} 1 1 {:.15g} {:.15g} {:.15g}\n'.format(2*i+1,self.pts[i,0],self.pts[i,1],self.pts[i,2])) # clamped
-				f.write('{:d} 1 1 {:.15g} {:.15g} {:.15g}\n'.format(2*i+2,self.pts_c[i,0],self.pts_c[i,1],self.pts_c[i,2])) # free
+				f.write('{:d} 1 1 {:.15g} {:.15g} {:.15g}\n'.format(2*i+1,self.pts_c[i,0],self.pts_c[i,1],self.pts_c[i,2])) # clamped
+				f.write('{:d} 1 1 {:.15g} {:.15g} {:.15g}\n'.format(2*i+2,self.pts[i,0],self.pts[i,1],self.pts[i,2])) # free
 			f.write('\n')
 
 			f.write('Velocities\n\n')
 			for i in range(self.n):
-				f.write('{:d} {:.15g} {:.15g} {:.15g}\n'.format(2*i+1,self.vel[i,0],self.vel[i,1],self.vel[i,2])) # clamped
-				f.write('{:d} {:.15g} {:.15g} {:.15g}\n'.format(2*i+2,self.vel_c[i,0],self.vel_c[i,1],self.vel_c[i,2])) # free
+				f.write('{:d} {:.15g} {:.15g} {:.15g}\n'.format(2*i+1,self.vel_c[i,0],self.vel_c[i,1],self.vel_c[i,2])) # clamped
+				f.write('{:d} {:.15g} {:.15g} {:.15g}\n'.format(2*i+2,self.vel[i,0],self.vel[i,1],self.vel[i,2])) # free
 			f.write('\n')
 
 			f.write('Bonds\n\n')

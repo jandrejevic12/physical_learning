@@ -8,4 +8,4 @@ Examples
    notebooks/make_packing_3d
    notebooks/train_allosteric_network
    notebooks/multiple_targets
-
+   notebooks/train_allosteric_network_thermal
