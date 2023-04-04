@@ -729,13 +729,23 @@ class Allosteric(Elastic):
 		q : ndarray
 			The position coordinates of the nodes.
 		dfdx : ndarray
-			The jacobian of the forces. Applied force jacobians are added
-			into this array as output.
+			Memory for storing the derivative of the applied forces in the free state with respect
+			to free state positions.
+		dfdx_c : ndarray
+			Memory for storing the derivative of the applied forces in the clamped state with respect
+			to clamped state positions.
+		dfdx_f : ndarray
+			Memory for storing the derivative of the applied forces in the clamped state with respect
+			to free state positions.
 		T : float
 			Period for oscillatory force. If T = 0, sources and targets are held
 			stationary.
 		applied_args : tuple
 			Simulation arguments: the source strain(s), target strain(s), and pinning stiffness.
+		train : int
+			The type of training to perform.
+		eta : float
+			Nudge factor.
 		'''
 
 		ess, ets, k = applied_args

@@ -260,14 +260,25 @@ class Elastic(object):
 			Used only if train is nonzero. Specifies the type of training approach to use. Default is
 			'learning'.
 		eta : float, optional
-			Learning rate by which to increment applied strain towards the target. Default is 1, which
+			Nudge factor by which to increment applied strain towards the target. Default is 1, which
 			corresponds to pinning directly at the target.
-		alpha : float, optional
-			Aging rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
-		vmin : float, optional
-			The smallest allowed value for each learning degree of freedom. Default is 1e-3.
+		alpha : float or ndarray, optional
+			Learning rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
+			If reported as an ndarray of 2 entries, provides the alpha for rest lengths, then stiffnesses.
+		vmin : float or ndarray, optional
+			The smallest allowed value for each learning degree of freedom. Default is 1e-3. If reported as
+			an ndarray of 2 entries, provides the vmin for rest lengths, then stiffnesses.
+		vsmooth : float or ndarray, optional
+			The value of the learning degree of freedom at which to begin smooth ramping to vmin. If reported as
+			an ndarray of 2 entries, provides the vsmooth for rest lengths, then stiffnesses.
 		pbar : bool, optional
-			Whether to display a progress bar. Default is True. 
+			Whether to display a progress bar. Default is True.
+
+
+		Returns
+		-------
+		dict
+			The scipy.integrate.solve_ivp return object, only for diagnostic purposes; the solution is internally parsed.
 		'''
 
 		edge_i, edge_j, edge_k, edge_l, edge_t = self._edge_lists()
@@ -400,12 +411,13 @@ class Elastic(object):
 			- network: Network edge properties obtained from _edge_lists().
 			- applied_args: Simulation arguments, which can vary by problem.
 			- train: The type of training to perform.
-			- method: Used only if train is nonzero. Specifies the type of training approach to use. Default is
+			- method: Used only if train is nonzero. Specifies the type of learning rule to use. Default is
 			  'learning'.
-			- eta: Learning rate by which to increment applied strain towards the target. Default is 1, which
+			- eta: Nudge factor by which to increment applied strain towards the target. Default is 1, which
 			  corresponds to pinning directly at the target.
-			- alpha: Aging rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
+			- alpha: Learning rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
 			- vmin: The smallest allowed value for each learning degree of freedom.
+			- vsmooth: The value of each learning degree of freedom at which to begin smooth ramp down to vmin.
 			- pbar: Whether to display a progress bar. Default is True. 
 
 		Returns
@@ -454,12 +466,13 @@ class Elastic(object):
 			- network: Network edge properties obtained from _edge_lists().
 			- applied_args: Simulation arguments, which can vary by problem.
 			- train: The type of training to perform.
-			- method: Used only if train is nonzero. Specifies the type of training approach to use. Default is
+			- method: Used only if train is nonzero. Specifies the type of learning rule to use. Default is
 			  'learning'.
-			- eta: Learning rate by which to increment applied strain towards the target. Default is 1, which
+			- eta: Nudge factor by which to increment applied strain towards the target. Default is 1, which
 			  corresponds to pinning directly at the target.
-			- alpha: Aging rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
+			- alpha: Learning rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
 			- vmin: The smallest allowed value for each learning degree of freedom.
+			- vsmooth: The value of each learning degree of freedom at which to begin smooth ramp down to vmin.
 			- pbar: Whether to display a progress bar. Default is True. 
 
 		Returns
@@ -550,12 +563,13 @@ class Elastic(object):
 			- network: Network edge properties obtained from _edge_lists().
 			- applied_args: Simulation arguments, which can vary by problem.
 			- train: The type of training to perform.
-			- method: Used only if train is nonzero. Specifies the type of training approach to use. Default is
+			- method: Used only if train is nonzero. Specifies the type of learning rule to use. Default is
 			  'learning'.
-			- eta: Learning rate by which to increment applied strain towards the target. Default is 1, which
+			- eta: Nudge factor by which to increment applied strain towards the target. Default is 1, which
 			  corresponds to pinning directly at the target.
-			- alpha: Aging rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
+			- alpha: Learning rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
 			- vmin: The smallest allowed value for each learning degree of freedom.
+			- vsmooth: The value of each learning degree of freedom at which to begin smooth ramp down to vmin.
 			- pbar: Whether to display a progress bar. Default is True. 
 
 		Returns
@@ -1066,11 +1080,13 @@ class Elastic(object):
 		dl : ndarray
 			The derivative of the rest lengths with time, populated on output.
 		eta : float
-			The learning rate.
+			The nudge factor.
 		alpha : float
-			The aging rate.
+			The learning rate.
 		lmin : float
 			The minimum allowed rest length.
+		lsmooth : float
+			Value at which to begin smoothly ramping to lmin.
 		network : tuple of ndarrays
 			Network edge properties obtained from _edge_lists().
 		'''
@@ -1115,12 +1131,26 @@ class Elastic(object):
 			The stiffness of each bond.
 		l : ndarray
 			The rest length of each bond.
+		dfdl : ndarray
+			Memory for storing the derivative of the elastic forces with respect to rest length in the free state.
+		dgdx : ndarray
+			Memory for storing derivative of the learning rule with respect to free state positions.
+		dfdl_c : ndarray
+			Memory for storing the derivative of the elastic forces with respect to rest length in the clamped state.
+		dgdx_c : ndarray
+			Memory for storing the derivative of the learning rule with respect to clamped state positions.
+		dgdk : ndarray
+			Memory for storing the derivative of the learning rule with respect to stiffnesses.
+		dgdl : ndarray
+			Memory for storing the derivative of the learning rule with respect to rest lengths.
 		eta : float
-			The learning rate.
+			The nudge factor.
 		alpha : float
-			The aging rate.
+			The learning rate.
 		lmin : float
 			The minimum allowed rest length.
+		lsmooth : float
+			Value at which to begin smoothly ramping to lmin.
 		network : tuple of ndarrays
 			Network edge properties obtained from _edge_lists().
 		'''
@@ -1203,11 +1233,13 @@ class Elastic(object):
 		dl : ndarray
 			The derivative of the rest lengths with time, populated on output.
 		eta : float
-			The learning rate.
+			The nudge factor.
 		alpha : float
-			The aging rate.
+			The learning rate.
 		lmin : float
 			The minimum allowed rest length.
+		lsmooth : float
+			Value at which to begin smooth ramp down to lmin.
 		network : tuple of ndarrays
 			Network edge properties obtained from _edge_lists().
 		'''
@@ -1246,12 +1278,26 @@ class Elastic(object):
 			The stiffness of each bond.
 		l : ndarray
 			The rest length of each bond.
+		dfdl : ndarray
+			Memory for storing the derivative of the elastic forces with respect to rest length in the free state.
+		dgdx : ndarray
+			Memory for storing derivative of the learning rule with respect to free state positions.
+		dfdl_c : ndarray
+			Memory for storing the derivative of the elastic forces with respect to rest length in the clamped state.
+		dgdx_c : ndarray
+			Memory for storing the derivative of the learning rule with respect to clamped state positions.
+		dgdk : ndarray
+			Memory for storing the derivative of the learning rule with respect to stiffnesses.
+		dgdl : ndarray
+			Memory for storing the derivative of the learning rule with respect to rest lengths.
 		eta : float
-			The learning rate.
+			The nudge factor.
 		alpha : float
-			The aging rate.
+			The learning rate.
 		lmin : float
 			The minimum allowed rest length.
+		lsmooth : float
+			Value at which to begin smooth ramp down to lmin.
 		network : tuple of ndarrays
 			Network edge properties obtained from _edge_lists().
 		'''
@@ -1327,11 +1373,13 @@ class Elastic(object):
 		dk : ndarray
 			The derivative of the stiffnesses with time, populated on output.
 		eta : float
-			The learning rate.
+			The nudge factor.
 		alpha : float
-			The aging rate.
+			The learning rate.
 		kmin : float
 			The minimum allowed stiffness.
+		ksmooth : float
+			Value at which to begin smooth ramp down to kmin.
 		network : tuple of ndarrays
 			Network edge properties obtained from _edge_lists().
 		'''
@@ -1377,12 +1425,26 @@ class Elastic(object):
 			The stiffness of each bond.
 		l : ndarray
 			The length of each bond.
+		dfdk : ndarray
+			Memory for storing the derivative of the elastic forces with respect to stiffness in the free state.
+		dgdx : ndarray
+			Memory for storing derivative of the learning rule with respect to free state positions.
+		dfdk_c : ndarray
+			Memory for storing the derivative of the elastic forces with respect to stiffness in the clamped state.
+		dgdx_c : ndarray
+			Memory for storing the derivative of the learning rule with respect to clamped state positions.
+		dgdk : ndarray
+			Memory for storing the derivative of the learning rule with respect to stiffnesses.
+		dgdl : ndarray
+			Memory for storing the derivative of the learning rule with respect to rest lengths.
 		eta : float
-			The learning rate.
+			The nudge factor.
 		alpha : float
-			The aging rate.
+			The learning rate.
 		kmin : float
 			The minimum allowed stiffness.
+		ksmooth : float
+			Value at which to begin smooth ramp down to kmin.
 		network : tuple of ndarrays
 			Network edge properties obtained from _edge_lists().
 		'''
@@ -1465,11 +1527,13 @@ class Elastic(object):
 		dk : ndarray
 			The derivative of the stiffnesses with time, populated on output.
 		eta : float
-			The learning rate.
+			The nudge factor.
 		alpha : float
-			The aging rate.
+			The learning rate.
 		kmin : float
 			The minimum allowed stiffness.
+		ksmooth : float
+			Value at which to begin smooth ramp down to kmin.
 		network : tuple of ndarrays
 			Network edge properties obtained from _edge_lists().
 		'''
@@ -1508,12 +1572,26 @@ class Elastic(object):
 			The stiffness of each bond.
 		l : ndarray
 			The length of each bond.
+		dfdk : ndarray
+			Memory for storing the derivative of the elastic forces with respect to stiffness in the free state.
+		dgdx : ndarray
+			Memory for storing derivative of the learning rule with respect to free state positions.
+		dfdk_c : ndarray
+			Memory for storing the derivative of the elastic forces with respect to stiffness in the clamped state.
+		dgdx_c : ndarray
+			Memory for storing the derivative of the learning rule with respect to clamped state positions.
+		dgdk : ndarray
+			Memory for storing the derivative of the learning rule with respect to stiffnesses.
+		dgdl : ndarray
+			Memory for storing the derivative of the learning rule with respect to rest lengths.
 		eta : float
-			The learning rate.
+			The nudge factor.
 		alpha : float
-			The aging rate.
+			The learning rate.
 		kmin : float
 			The minimum allowed stiffness.
+		ksmooth : float
+			Value at which to start smooth ramp down to kmin.
 		network : tuple of ndarrays
 			Network edge properties obtained from _edge_lists().
 		'''
