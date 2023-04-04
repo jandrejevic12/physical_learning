@@ -238,7 +238,7 @@ class Elastic(object):
 	def solve(self, duration, frames, T, applied_args, train=0, method='learning', eta=1., alpha=1e-3, vmin=1e-3, vsmooth=None, pbar=True, integrator='LSODA', rtol=1e-6, atol=1e-8):	
 		'''Numerically integrate the elastic network in time.
 
-		This routine ptionally trains edge stiffnesses or rest lengths using directed aging or
+		This routine optionally trains edge stiffnesses or rest lengths using directed aging or
 		coupled learning. Upon completion, an output trajectory of frames+1 snapshots is stored
 		in the attribute 'traj', and corresponding times in 't_eval'.
 		
@@ -273,6 +273,10 @@ class Elastic(object):
 			an ndarray of 2 entries, provides the vsmooth for rest lengths, then stiffnesses.
 		pbar : bool, optional
 			Whether to display a progress bar. Default is True.
+		integrator : str, optional
+			Type of integrator to use, as available for scipy.integrate.solve_ivp. Default is 'LSODA'.
+		rtol, atol : float, optional
+			The relative and absolute error tolerance for the integrator, respectively. Default values are 1e-6 and 1e-8.
 
 
 		Returns
