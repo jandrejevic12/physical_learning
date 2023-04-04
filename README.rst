@@ -15,7 +15,7 @@ Setup
    
    $ git clone https://github.com/jandrejevic12/physical_learning.git
 
-2. The main directory contains an environment.yml file for easily setting up a conda environment, named lrn, with all the package dependencies:
+2. The main directory contains an :code:`environment.yml` file for easily setting up a conda environment, named :code:`lrn`, with all the package dependencies:
 
 .. code-block:: bash
    
@@ -27,8 +27,8 @@ Setup
    
    $ brew install povray
 
-4. Several jupyter notebooks are provided for getting started generating and training elastic networks, and can be viewed on the `documentation page <https://physical-learning.readthedocs.io/en/latest/examples.html>`_.
+4. Training networks at nonzero temperature makes use of the `LAMMPS software <https://www.lammps.org/#gsc.tab=0>`_. Please see the instructions in `lammps_ext <https://github.com/jandrejevic12/physical_learning/tree/main/lammps_ext>`_ for incorporating the extended LAMMPS code.
 
-
+5. Several jupyter notebooks are provided for getting started generating and training elastic networks, and can be viewed on the `documentation page <https://physical-learning.readthedocs.io/en/latest/examples.html>`_.
 
 
