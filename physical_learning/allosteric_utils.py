@@ -24,13 +24,6 @@ class Allosteric(Elastic):
 	dim : int, optional
 		The dimensionality of the system. Valid options are 2 and 3. If graph is a filename,
 		the dimensionality will be read out from the file.
-	auto : bool, optional
-		Whether to select a source and target pair automatically at random. Default
-		is False, which prompts user input for the source and target, unless the input
-		graph already has at least one source specified. Additional sources and targets
-		may be added with the methods add_sources(ns) and add_targets(nt).
-	seed : int, optional
-		The random seed to use if selecting sources and targets at random.
 	params : dict, optional
 		Specifies system parameters. Required keywords are :
 
@@ -84,15 +77,11 @@ class Allosteric(Elastic):
 		The corresponding time at each simulated frame.
 	'''
 	
-	def __init__(self, graph, dim=2, auto=False, seed=12, params={'rfac':0.05, 'drag':0.01, 'dashpot':10., 'stiffness':1.}):
+	def __init__(self, graph, dim=2, params={'rfac':0.05, 'drag':0.01, 'dashpot':10., 'stiffness':1.}):
 		
 		if (dim != 2) and (dim != 3):
 			raise ValueError("Dimension must be 2 or 3.")
 
-		if dim == 3:
-			auto = True # must select automatically
-
-		self.seed = seed
 		self.sources = []
 		self.targets = []
 
@@ -104,11 +93,6 @@ class Allosteric(Elastic):
 		# with a single bond.
 		super().__init__(graph, dim, params)
 		self._remove_dangling_edges()
-
-		# Choose initial set of source and target nodes, if none
-		# are present initially.
-		if len(self.sources) == 0:
-			self._add_source_target(auto)
 
 	'''
 	*****************************************************************************************************
@@ -146,7 +130,7 @@ class Allosteric(Elastic):
 				line = f.readline().rstrip('\n').split()
 				x, y, z = float(line[0]), float(line[1]), float(line[2])
 				dpos[i] = np.array([x,y,z])
-			graph = nx.random_geometric_graph(n, 0, seed=self.seed, pos=dpos)
+			graph = nx.random_geometric_graph(n, 0, seed=12, pos=dpos)
 			
 			# Read edges
 			ne = int(f.readline().rstrip('\n'))
@@ -180,110 +164,128 @@ class Allosteric(Elastic):
 						self.targets += [{'i':ti, 'j':tj, 'length':tl, 'phase':sp}]
 		return graph, dim
 
-	def _add_source_target(self, auto=False):
-		'''Add a pair of source nodes and a pair of target nodes.
+	def add_sources(self, ns=1, auto=True, boundary=False, seed=12):
+		'''Add pairs of source nodes to the network.
+
+		If any two connected nodes are selected, the edge between them is removed.
+
+		Parameters
+		----------
+		ns : int, optional
+			The number of new pairs of source nodes to add. Default is 1.
+		auto : bool, optional
+			Whether to select sources automatically (True) or manually (False).
+			Default is True.
+		boundary : bool, optional
+			Whether to restrict the choice of source nodes to the boundary. Default
+			is False.
+		seed : int, optional
+			The random seed to use if selecting sources automatically.
+		'''
+
+		if self.dim == 3 and not auto:
+			auto = True
+			print("Sources will be chosen automatically for a 3D network.")
+
+		if auto:
+			if boundary:
+				success = self._add_pairs_boundary(ns, kind='source', seed=seed)
+			else:
+				success = self._add_pairs_auto(ns, kind='source', seed=seed)
+		else:
+			self._add_pairs_manual(ns, kind='source')
+
+	def add_targets(self, nt=1, auto=True, boundary=False, seed=12):
+		'''Add pairs of target nodes to the network.
+
+		If any two connected nodes are selected, the edge between them is removed.
+
+		Parameters
+		----------
+		ns : int, optional
+			The number of new pairs of target nodes to add. Default is 1.
+		auto : bool, optional
+			Whether to select targets automatically (True) or manually (False).
+			Default is True.
+		boundary : bool, optional
+			Whether to restrict the choice of target nodes to the boundary. Default
+			is False.
+		seed : int, optional
+			The random seed to use if selecting targets automatically.
+		'''
+
+		if self.dim == 3 and not auto:
+			auto = True
+			print("Targets will be chosen automatically for a 3D network.")
+
+		if auto:
+			if boundary:
+				success = self._add_pairs_boundary(nt, kind='target', seed=seed)
+			else:
+				success = self._add_pairs_auto(nt, kind='target', seed=seed)
+		else:
+			self._add_pairs_manual(nt, kind='target')
+
+	def _add_pairs_auto(self, n, kind, seed):
+		'''Select node pairs automatically and append to source or target lists.
 		
 		Parameters
 		----------
-		auto : bool, optional
-			Whether to select a source and target pair automatically at random. Default
-			is False, which prompts user input for the source and target, unless the input
-			graph already has at least one source specified. Additional sources and targets
-			may be added with the methods add_sources(ns) and add_targets(nt).
+		n : int
+			The number of new pairs of source or target nodes to add.
+		kind : str, 'source' or 'target'
+			Whether to add the selected pairs to source or target nodes.
+		seed : int
+			The random seed to use.
 		'''
 
-		if auto:
-			self._auto_source_target()
-		else:
-			self._pick_source_target()
+		min_degree = self.dim+2
+		edges = list(self.graph.edges())
 
-	def _auto_source_target(self):
-		'''Select a pair of source and target nodes at random.
+		# exclude from consideration any edges which terminate at an existing source or target,
+		# or which have fewer than the specified number of connections.
+		excluded_nodes = []
+		for source in self.sources:
+			excluded_nodes += [source['i'], source['j']]
+		for target in self.targets:
+			excluded_nodes += [target['i'], target['j']]
 
-		The source and target will be chosen from unbonded neighboring nodes along
-		the edge. If the routine fails to find suitable options, it will revert to
-		manual selection.
+		for i in range(self.n):
+			if self.graph.degree(i) < min_degree: excluded_nodes += [i]
+
+		for e in range(len(edges)-1,-1,-1):
+			edge = edges[e]
+			if edge[0] in excluded_nodes or edge[1] in excluded_nodes: edges.pop(e)
+
+		success = self._add_pairs_by_distance(n, edges, kind, seed)
+		self.plot()
+		return success
+
+	def _add_pairs_boundary(self, n, kind, seed):
+		'''Select node pairs automatically and append to source or target lists.
+
+		Pairs will be chosen to lie on the boundary of the network. If a suitable choice cannot
+		be made, the function will revert to manual mode (for 2D networks).
+		
+		Parameters
+		----------
+		n : int
+			The number of new pairs of source or target nodes to add.
+		kind : str, 'source' or 'target'
+			Whether to add the selected pairs to source or target nodes.
+		seed : int
+			The random seed to use.
+
+		Returns
+		-------
+		bool
+			Whether all edge selections were successful. If False, not all edges could be added.
 		'''
 
-		# Identify edge points using Voronoi tessellation.
-		vor, tri, bound_pairs, interior_pairs = self._find_boundary_pairs()
-
-		if (len(bound_pairs) < 1) or (len(interior_pairs) < 1):
-			print("Unable to find suitable source and target; switching to manual mode.")
-			self._pick_source_target()
-
-		else:
-			np.random.seed(self.seed)
-			se = np.random.randint(len(bound_pairs))
-			si = bound_pairs[se][0]
-			sj = bound_pairs[se][1]
-
-			'''
-			# eliminate any overlapping pairs
-			for i in range(len(interior_pairs)-1,-1,-1):
-				if interior_pairs[i][0] == si or interior_pairs[i][0] == sj \
-				or interior_pairs[i][1] == si or interior_pairs[i][1] == sj:
-					interior_pairs.pop(i)
-
-			if len(interior_pairs) < 1:
-				print("Unable to find suitable source and target; switching to manual mode.")
-				self._pick_source_target()
-			'''
-
-			# eliminate any overlapping pairs
-			for i in range(len(bound_pairs)-1,-1,-1):
-				if bound_pairs[i][0] == si or bound_pairs[i][0] == sj \
-				or bound_pairs[i][1] == si or bound_pairs[i][1] == sj:
-					bound_pairs.pop(i)
-
-			if len(bound_pairs) < 1:
-				print("Unable to find suitable source and target; switching to manual mode.")
-				self._pick_source_target()
-
-			else:
-				# Choose the pair that is furthest away from the source by computing the
-				# shortest path on the graph between the source nodes and all other
-				# bound pair nodes.
-				ti = bound_pairs[0][0]
-				tj = bound_pairs[0][1]
-				#ti = interior_pairs[0][0]
-				#tj = interior_pairs[0][1]
-				dmax = 0
-				#for p in interior_pairs:
-				for p in bound_pairs:
-					dii = nx.shortest_path_length(self.graph,si,p[0])
-					dij = nx.shortest_path_length(self.graph,si,p[1])
-					dji = nx.shortest_path_length(self.graph,sj,p[0])
-					djj = nx.shortest_path_length(self.graph,sj,p[1])
-					d = 0.25*(dii+dij+dji+djj)
-					if d > dmax:
-						dmax = d
-						ti, tj = p[0], p[1]
-
-				self.sources += [{'i':si, 'j':sj, 'length':self._distance(self.pts[si], self.pts[sj]), 'phase':1}]
-				self.targets += [{'i':ti, 'j':tj, 'length':self._distance(self.pts[ti], self.pts[tj]), 'phase':1}]
-
-				# remove the selected bonds.
-				if self.graph.has_edge(si,sj):
-					self.graph.remove_edge(si,sj)
-				if self.graph.has_edge(ti,tj):
-					self.graph.remove_edge(ti,tj)
-				self._remove_dangling_edges()
-				self._set_coordination()
-
-				'''
-				fig, ax = plt.subplots(1,1,figsize=(5,5))
-				voronoi_plot_2d(vor, ax, show_points=False, show_vertices=False, line_width=1, line_colors=[0.8,0.8,0.8])
-				ec, dc = self.plot_network(ax)
-				for source in self.sources:
-					s = self.plot_source(ax, source)
-				for target in self.targets:
-					t = self.plot_target(ax, target)
-				  
-				self.set_axes(ax)
-				plt.show()
-				'''
-				self.plot()
+		vor, tri, edges = self._find_boundary_pairs()
+		success = self._add_pairs_by_distance(n, edges, kind, seed)
+		self.plot()
+		return success
 
 	def _find_boundary_pairs(self):
 		'''Identify node pairs on the boundary of the network.'''
@@ -322,129 +324,130 @@ class Allosteric(Elastic):
 					   or (self.graph.has_edge(p[0],p[1]) and self.graph.degree(p[0]) >= min_degree+1
 					   and self.graph.degree(p[1]) >=min_degree+1)]
 
-		print(len(bound_pairs))
+		return vor, tri, bound_pairs
 
-		# next, identify inside pairs one layer in.
-		_, _, bound_nodes = self._find_boundary_nodes()
-		interior_nodes = []
-		for node in bound_nodes:
-			for edge in self.graph.edges(node):
-				if edge[1] not in bound_nodes:
-					interior_nodes += [edge[1]]
+	def _add_pairs_by_distance(self, n, edges, kind, seed):
+		'''Incrementally select from edges the n best separated pairs as new sources or targets.
+		
+		Parameters
+		----------
+		n : int
+			The number of new pairs of source or target nodes to add.
+		kind : str, 'source' or 'target'
+			Whether to add the selected pairs to source or target nodes.
+		seed : int
+			The random seed to use.
 
-		interior_pairs = []
-		for nodes in vor.ridge_points:
-			p1, p2 = nodes
-			if (p1 in interior_nodes) and (p2 in interior_nodes):
-				interior_pairs += [[p1, p2]]
-			
-		interior_pairs = [[p[0],p[1]] for p in interior_pairs
-					   if (not self.graph.has_edge(p[0],p[1]) and self.graph.degree(p[0]) >= min_degree
-					   and self.graph.degree(p[1]) >=min_degree)
-					   or (self.graph.has_edge(p[0],p[1]) and self.graph.degree(p[0]) >= min_degree+1
-					   and self.graph.degree(p[1]) >=min_degree+1)]
-
-		return vor, tri, bound_pairs, interior_pairs
-
-	def _find_boundary_nodes(self):
-		# Construct Voronoi diagram.
-		vor = Voronoi(self.pts_init[:,:self.dim])
-		tri = Delaunay(self.pts_init[:,:self.dim])
-
-		# Vertex positions.
-		verts = vor.vertices
-
-		# Identify any nodes whose Voronoi cell has vertices outside the convex hull.
-		bound_nodes = []
-
-		for i,r in enumerate(vor.point_region):
-			vs = vor.regions[r]
-			outside = np.zeros(len(vs), dtype=bool)
-			for j,v in enumerate(vs):
-				outside[j] = (v < 0) or (tri.find_simplex(verts[v]) < 0)
-			if np.any(outside):
-				bound_nodes += [i]
-
-		return vor, tri, bound_nodes
-
-	def _pick_source_target(self):
-		'''Select a pair of source and target nodes manually.
-
-		A selection is made by clicking first each of two source nodes, then each of two target nodes,
-		on the provided plot. If any two connected nodes are selected, the edge between them is removed.
+		Returns
+		-------
+		bool
+			Whether all edge selections were successful. If False, not all edges could be added.
 		'''
 
-		fig, ax = plt.subplots(1,1,figsize=(5,5))
-		ax.set_title("Select two source nodes (blue), then two target nodes (red).", size=10)
-		ec, dc = self.plot_network(ax)
+		nadd = 0
+		if len(edges) < 1:
+			print("Not enough valid pairs; successfully added {:d} of {:d} {:s}(s).".format(nadd,n,kind))
+			return False
 
-		ip, = ax.plot(self.pts[:,0], self.pts[:,1], '.', color='k',
-						picker=True, pickradius=5)
+		# exclude from consideration any edges which terminate at an existing source or target.
+		excluded_nodes = []
+		for source in self.sources:
+			excluded_nodes += [source['i'], source['j']]
+		for target in self.targets:
+			excluded_nodes += [target['i'], target['j']]
 
-		# cover detached points in white
-		r = 4*self.params['radius']*np.ones(self.n)[self.degree<2]
-		dc2 = mc.EllipseCollection(r, r, np.zeros_like(r), offsets=self.pts[self.degree<2,:self.dim],
-									  transOffset=ax.transData, units='x',
-									  edgecolor='w', facecolor='w', linewidths=2, zorder=1000)
-		ax.add_collection(dc2)
+		for e in range(len(edges)-1,-1,-1):
+			edge = edges[e]
+			if edge[0] in excluded_nodes or edge[1] in excluded_nodes: edges.pop(e)
 
-		colors = [pal['blue'],pal['blue'],pal['red'],pal['red']]
-		self.pick_count = 0
-		source = {'i':0, 'j':0, 'length':0, 'phase':1}
-		target = {'i':0, 'j':0, 'length':0, 'phase':1}
+		# compute the smallest distance of each edge to current sources and targets, in order
+		# to place the new source(s) or target(s) maximally away.
+		dmin = [1e20 for _ in range(len(edges))]
+		for e,edge in enumerate(edges):
+			for source in self.sources:
+				si, sj = source['i'], source['j']
+				d = self._edge_edge_distance([si, sj], edge)
+				if d < dmin[e]: dmin[e] = d
+			for target in self.targets:
+				ti, tj = target['i'], target['j']
+				d = self._edge_edge_distance([ti, tj], edge)
+				if d < dmin[e]: dmin[e] = d
 
-		def onpick(event):
-			artist = event.artist
-			xdata = artist.get_xdata()
-			ydata = artist.get_ydata()
-			ind = event.ind
-			pts = tuple(zip(xdata[ind], ydata[ind]))
-			self.pick_count += 1
-			if self.pick_count == 1:
-				for pt in pts:
-					ax.scatter(pt[0], pt[1], s=60, edgecolor='k', facecolor=colors[self.pick_count-1], lw=1, zorder=1000)
-				source['i'] = ind[0]
-			elif self.pick_count == 2:
-				for pt in pts:
-					ax.scatter(pt[0], pt[1], s=60, edgecolor='k', facecolor=colors[self.pick_count-1], lw=1, zorder=1000)
-				source['j'] = ind[0]
-				source['length'] = self._distance(self.pts[source['i']],self.pts[source['j']])
-				if self.graph.has_edge(source['i'],source['j']):
-					self.graph.remove_edge(source['i'],source['j'])
-			elif self.pick_count == 3:
-				for pt in pts:
-					ax.scatter(pt[0], pt[1], s=60, edgecolor='k', facecolor=colors[self.pick_count-1], lw=1, zorder=1000)
-				target['i'] = ind[0]
-			elif self.pick_count == 4:
-				for pt in pts:
-					ax.scatter(pt[0], pt[1], s=60, edgecolor='k', facecolor=colors[self.pick_count-1], lw=1, zorder=1000)
-				target['j'] = ind[0]
-				target['length'] = self._distance(self.pts[target['i']],self.pts[target['j']])
-				if self.graph.has_edge(target['i'],target['j']):
-					self.graph.remove_edge(target['i'],target['j'])
-				self.sources += [source]
-				self.targets += [target]
-				self._set_coordination()
+		# iterate over the desired number of sources or targets to add.
+		np.random.seed(seed)
+		for p in range(n):
+			if len(edges) < 1:
+				print("Not enough valid pairs; successfully added {:d} of {:d} {:s}(s).".format(nadd,n,kind))
+				return False
+			if (len(self.sources) == 0) and (len(self.targets) == 0): # select first one at random, otherwise maximize distance.
+				e = np.random.randint(len(edges))
+			else:
+				e = np.argmax(dmin)
+			i = edges[e][0]
+			j = edges[e][1]
+			pair = [{'i':i, 'j':j, 'length':self._distance(self.pts[i], self.pts[j]), 'phase':1}]
+			if kind == 'source':
+				self.sources += pair
+			else:
+				self.targets += pair
+			nadd += 1
+			if self.graph.has_edge(i,j):
+				self.graph.remove_edge(i,j)
+			edges.pop(e)
+			dmin.pop(e)
+			self._set_coordination()
 
-		fig.canvas.mpl_connect('pick_event', onpick)
+			# remove pairs with overlapping nodes from consideration
+			for e in range(len(edges)-1,-1,-1): 
+				edge = edges[e]
+				if edge[0] in [i,j] or edge[1] in [i,j]:
+					edges.pop(e)
+					dmin.pop(e)
 
-		self.set_axes(ax)
-		fig.tight_layout()
-		plt.show()
+			# update distances.
+			for e,edge in enumerate(edges):
+				d = self._edge_edge_distance([i, j], edge)
+				if d < dmin[e]: dmin[e] = d
 
-	def add_sources(self, ns):
-		'''Add pairs of source nodes to the network.
+		return True
+
+	def _edge_edge_distance(self, e0, e1):
+		'''Compute an average distance between two edges.
+
+		Parameters
+		----------
+		e0 : list or ndarray
+			The first edge (i,j) to consider.
+		e1 : list or ndarray
+			The second edge (i,j) to consider.
+
+		Returns
+		-------
+		float
+			The averaged distance between the two edges.
+		'''
+		dii = nx.shortest_path_length(self.graph, e0[0], e1[0], weight='length')
+		dij = nx.shortest_path_length(self.graph,e0[0],e1[1], weight='length')
+		dji = nx.shortest_path_length(self.graph,e0[1],e1[0], weight='length')
+		djj = nx.shortest_path_length(self.graph,e0[1],e1[1], weight='length')
+		d = 0.25*(dii+dij+dji+djj)
+		return d
+
+	def _add_pairs_manual(self, n, kind):
+		'''Add pairs of source or target nodes to the network.
 
 		If any two connected nodes are selected, the edge between them is removed.
 
 		Parameters
 		----------
-		ns : int
-			The number of new pairs of source nodes to add.
+		n : int
+			The number of new pairs of source or target nodes to add.
+		kind : str, 'source' or 'target'
+			Whether to add the selected pairs to source or target nodes.
 		'''
 
 		fig, ax = plt.subplots(1,1,figsize=(5,5))
-		ax.set_title("Select {:d} source pairs.".format(ns), size=10)
+		ax.set_title("Select {:d} pairs.".format(n), size=10)
 		ec, dc = self.plot_network(ax)
 
 		ip, = ax.plot(self.pts[:,0], self.pts[:,1], '.', color='k',
@@ -465,8 +468,10 @@ class Allosteric(Elastic):
 
 
 		color = pal['blue']
+		if kind == 'target': color = pal['red']
+
 		self.pick_count = 0
-		sources = [{'i':0, 'j':0, 'length':0, 'phase':1} for _ in range(ns)]
+		pairs = [{'i':0, 'j':0, 'length':0, 'phase':1} for _ in range(n)]
 
 		def onpick(event):
 			artist = event.artist
@@ -475,89 +480,23 @@ class Allosteric(Elastic):
 			ind = event.ind
 			pts = tuple(zip(xdata[ind], ydata[ind]))
 			self.pick_count += 1
-			if self.pick_count > 0 and self.pick_count <= 2*ns:
+			if self.pick_count > 0 and self.pick_count <= 2*n:
 				if self.pick_count % 2 == 1:
 					for pt in pts:
 						ax.scatter(pt[0], pt[1], s=60, edgecolor='k', facecolor=color, lw=1, zorder=1000)
-					si = self.pick_count // 2
-					sources[si]['i'] = ind[0]
+					p = self.pick_count // 2
+					pairs[p]['i'] = ind[0]
 				else:
 					for pt in pts:
 						ax.scatter(pt[0], pt[1], s=60, edgecolor='k', facecolor=color, lw=1, zorder=1000)
-					si = self.pick_count // 2 - 1
-					sources[si]['j'] = ind[0]
-					sources[si]['length'] = self._distance(self.pts[sources[si]['i']],self.pts[sources[si]['j']])
-					if self.graph.has_edge(sources[si]['i'],sources[si]['j']):
-						self.graph.remove_edge(sources[si]['i'],sources[si]['j'])
-				if self.pick_count == 2*ns:
-					self.sources += sources
-					self._set_coordination()
-
-		fig.canvas.mpl_connect('pick_event', onpick)
-
-		self.set_axes(ax)
-		fig.tight_layout()
-		plt.show()
-
-	def add_targets(self, nt):
-		'''Add pairs of target nodes to the network.
-
-		If any two connected nodes are selected, the edge between them is removed.
-
-		Parameters
-		----------
-		nt : int
-			The number of new pairs of target nodes to add.
-		'''
-
-		fig, ax = plt.subplots(1,1,figsize=(5,5))
-		ax.set_title("Select {:d} target pairs.".format(nt), size=10)
-		ec, dc = self.plot_network(ax)
-
-		ip, = ax.plot(self.pts[:,0], self.pts[:,1], '.', color='k',
-						picker=True, pickradius=5)
-
-		# cover detached points in white
-		r = 4*self.params['radius']*np.ones(self.n)[self.degree<2]
-		dc2 = mc.EllipseCollection(r, r, np.zeros_like(r), offsets=self.pts[self.degree<2,:self.dim],
-									  transOffset=ax.transData, units='x',
-									  edgecolor='w', facecolor='w', linewidths=2, zorder=1000)
-		ax.add_collection(dc2)
-
-		for source in self.sources:
-			self.plot_source(ax, source)
-
-		for target in self.targets:
-			self.plot_target(ax, target)
-
-
-		color = pal['red']
-		self.pick_count = 0
-		targets = [{'i':0, 'j':0, 'length':0, 'phase':1} for _ in range(nt)]
-
-		def onpick(event):
-			artist = event.artist
-			xdata = artist.get_xdata()
-			ydata = artist.get_ydata()
-			ind = event.ind
-			pts = tuple(zip(xdata[ind], ydata[ind]))
-			self.pick_count += 1
-			if self.pick_count > 0 and self.pick_count <= 2*nt:
-				if self.pick_count % 2 == 1:
-					for pt in pts:
-						ax.scatter(pt[0], pt[1], s=60, edgecolor='k', facecolor=color, lw=1, zorder=1000)
-					ti = self.pick_count // 2
-					targets[ti]['i'] = ind[0]
-				else:
-					for pt in pts:
-						ax.scatter(pt[0], pt[1], s=60, edgecolor='k', facecolor=color, lw=1, zorder=1000)
-					ti = self.pick_count // 2 - 1
-					targets[ti]['j'] = ind[0]
-					targets[ti]['length'] = self._distance(self.pts[targets[ti]['i']],self.pts[targets[ti]['j']])
-					if self.graph.has_edge(targets[ti]['i'],targets[ti]['j']):
-						self.graph.remove_edge(targets[ti]['i'],targets[ti]['j'])
-				if self.pick_count == 2*nt:
-					self.targets += targets
+					p = self.pick_count // 2 - 1
+					pairs[p]['j'] = ind[0]
+					pairs[p]['length'] = self._distance(self.pts[pairs[p]['i']],self.pts[pairs[p]['j']])
+					if self.graph.has_edge(pairs[p]['i'],pairs[p]['j']):
+						self.graph.remove_edge(pairs[p]['i'],pairs[p]['j'])
+				if self.pick_count == 2*n:
+					if kind == 'source': self.sources += pairs
+					else: self.targets += pairs
 					self._set_coordination()
 
 		fig.canvas.mpl_connect('pick_event', onpick)
@@ -1381,7 +1320,9 @@ class Allosteric(Elastic):
 	def _animate_2d(self, figsize=(5,5), skip=1):
 		'''Animate a 2D system.'''
 
-		frames = len(self.traj[::skip]) - 1
+		self.reset_init()
+		traj = self.rigid_correction()
+		frames = len(traj[::skip]) - 1
 		fig, ax =plt.subplots(1,1,figsize=figsize)
 		ec, dc = self.plot_network(ax)
 
@@ -1391,11 +1332,14 @@ class Allosteric(Elastic):
 		for target in self.targets:
 			t += [self.plot_target(ax, target)]
 
-		self.set_axes(ax)
+		lim = (1+1./np.sqrt(self.n))*np.max(np.abs(traj))
+		ax.set_xlim(-lim,lim)
+		ax.set_ylim(-lim,lim)
+		ax.axis('off')
 		fig.tight_layout()
 
 		def step(i):
-			self.set_frame(i*skip)
+			self.pts = traj[i*skip]
 			e = self._collect_edges()
 			ec.set_segments(e[:,:,:self.dim])
 			dc.set_offsets(self.pts[self.degree>0,:self.dim])
@@ -1413,7 +1357,10 @@ class Allosteric(Elastic):
 
 	def _animate_3d(self, spine=False, contour=False, figsize=(5,5), skip=1):
 		'''Animate a 3D system.'''
-		frames = len(self.traj[::skip]) - 1
+
+		self.reset_init()
+		traj = self.rigid_correction()
+		frames = len(traj[::skip]) - 1
 		
 		fig, ax = plt.subplots(1,1,figsize=figsize)
 		width = int(100*figsize[0]); height = int(100*figsize[1])
@@ -1447,7 +1394,7 @@ class Allosteric(Elastic):
 
 		def step(i):
 			print("Rendering frame {:d}/{:d}".format(i+1,frames+1), end="\r")
-			self.set_frame(i*skip)
+			self.pts = traj[i*skip]
 			spheres = []; edges = []; hull = []
 			if spine:
 				spheres = self._povray_spheres(nodes)
@@ -1774,7 +1721,7 @@ class Allosteric(Elastic):
 		# reset
 		self.reset_init()
 
-		lim = 1.5*np.max(np.abs(self.pts))
+		lim = (1+1./np.sqrt(self.n))*np.max(np.abs(self.pts))
 		ax.set_xlim(-lim,lim)
 		ax.set_ylim(-lim,lim)
 		ax.axis('off')

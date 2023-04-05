@@ -42,8 +42,6 @@ class Elastic(object):
 		be updated during training.
 	dim : int
 		The dimensionality of the system. Valid options are 2 and 3.
-	seed : int
-		A random seed used for selecting sources and targets at random.
 	n : int
 		Number of nodes in the network.
 	ne : int
@@ -1831,7 +1829,7 @@ class Elastic(object):
 			The axes to set up.
 		'''
 
-		lim = 1.1*np.max(np.abs(self.pts))
+		lim = (1+1./np.sqrt(self.n))*np.max(np.abs(self.pts))
 		ax.set_xlim(-lim,lim)
 		ax.set_ylim(-lim,lim)
 		ax.axis('off')
