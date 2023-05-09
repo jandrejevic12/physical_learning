@@ -75,12 +75,7 @@ class Elastic(object):
 		self.graph = graph
 		self.dim = dim
 
-		if 'stiffness' not in list(self.graph.edges(data=True))[0][2]:
-			nx.set_edge_attributes(self.graph, self.params['stiffness'], 'stiffness')
-		if 'length' not in list(self.graph.edges(data=True))[0][2]:
-			nx.set_edge_attributes(self.graph, 1., 'length')
-		if 'trainable' not in list(self.graph.edges(data=True))[0][2]:
-			nx.set_edge_attributes(self.graph, True, 'trainable')
+		
 
 		# set network node positions and elastic properties
 		self.n = len(self.graph.nodes())
@@ -90,7 +85,22 @@ class Elastic(object):
 			self.pts[i,:] = self.graph.nodes[i]['pos']
 		self.pts_c = np.copy(self.pts)
 		self.vel_c = np.copy(self.vel)
-		self._set_attributes()
+		self.pts_s = np.copy(self.pts)
+		self.pts_sc = np.copy(self.pts)
+		self.vel_s = np.copy(self.vel)
+		self.vel_sc = np.copy(self.vel)
+
+		if 'stiffness' not in list(self.graph.edges(data=True))[0][2]:
+			nx.set_edge_attributes(self.graph, self.params['stiffness'], 'stiffness')
+		if 'length' not in list(self.graph.edges(data=True))[0][2]:
+			nx.set_edge_attributes(self.graph, 1., 'length')
+			min_l = self._set_attributes()
+		else:
+			min_l = np.min([edge[2]['length'] for edge in self.graph.edges(data=True)])
+		self.params['radius'] = self.params['rfac']*min_l
+		if 'trainable' not in list(self.graph.edges(data=True))[0][2]:
+			nx.set_edge_attributes(self.graph, True, 'trainable')
+
 		self._set_coordination()
 
 		self.pts_init = np.copy(self.pts)
@@ -118,7 +128,7 @@ class Elastic(object):
 			edge[2]['length'] = l
 			if l > min_l:
 				min_l = l
-		self.params['radius'] = self.params['rfac']*min_l
+		return min_l
 
 	def _set_degree(self):
 		'''Compute the degree (number of neighbors) of each node.'''
@@ -140,8 +150,12 @@ class Elastic(object):
 
 		self.pts = np.copy(self.pts_init)
 		self.pts_c = np.copy(self.pts_init)
+		self.pts_s = np.copy(self.pts_init)
+		self.pts_sc = np.copy(self.pts_init)
 		self.vel *= 0
 		self.vel_c *= 0
+		self.vel_s *= 0
+		self.vel_sc *= 0
 
 	def reset_equilibrium(self):
 		'''Set the current network state to its equilibrium state.'''
@@ -150,6 +164,8 @@ class Elastic(object):
 		self.pts_init = np.copy(self.pts)
 		self.vel *= 0.
 		self.vel_c *= 0.
+		self.vel_s *= 0.
+		self.vel_sc *= 0.
 		
 		# reset edge rest lengths
 		for edge in self.graph.edges(data=True):
@@ -233,7 +249,7 @@ class Elastic(object):
 	*****************************************************************************************************
 	'''
 
-	def solve(self, duration, frames, T, applied_args, train=0, method='learning', eta=1., alpha=1e-3, vmin=1e-3, vsmooth=None, pbar=True, integrator='LSODA', rtol=1e-6, atol=1e-8):	
+	def solve(self, duration, frames, T, applied_args, train=0, method='learning', eta=1., alpha=1e-3, vmin=1e-3, vsmooth=None, fix=0, symmetric=False, pbar=True, integrator='LSODA', rtol=1e-6, atol=1e-8):	
 		'''Numerically integrate the elastic network in time.
 
 		This routine optionally trains edge stiffnesses or rest lengths using directed aging or
@@ -269,6 +285,11 @@ class Elastic(object):
 		vsmooth : float or ndarray, optional
 			The value of the learning degree of freedom at which to begin smooth ramping to vmin. If reported as
 			an ndarray of 2 entries, provides the vsmooth for rest lengths, then stiffnesses.
+		fix : ndarray, optional
+			An (n,3) array indicating which degrees of freedom should remain fixed and not integrated. If default (0),
+			all degrees of freedom are integrated.
+		symmetric : bool, optional
+			Whether to introduce a symmetric state for training with a different set of boundary conditions. Default is False.
 		pbar : bool, optional
 			Whether to display a progress bar. Default is True.
 		integrator : str, optional
@@ -289,11 +310,17 @@ class Elastic(object):
 
 		q = np.hstack([self.pts.ravel(),self.vel.ravel()])
 
+		if not hasattr(fix, '__len__'): fix = np.zeros((n,3), dtype=bool)
+
 		# if training, augment with one additional network:
 		# base network is the free strained state.
 		# second is the clamped strained state.
+		# if symmetric, augment with an additional free and clamped state.
 		if train:
 			q = np.hstack([q,self.pts_c.ravel(),self.vel_c.ravel()])
+			if symmetric:
+				q = np.hstack([q,self.pts_s.ravel(),self.vel_s.ravel()])
+				q = np.hstack([q,self.pts_sc.ravel(),self.vel_sc.ravel()])
 			if train & 1:
 				q = np.hstack([q, edge_l]) # train lengths
 			if train & 2:
@@ -317,12 +344,12 @@ class Elastic(object):
 					  bar_format='{l_bar}{bar}| {n:.2f}/{total:.2f} [{elapsed}<{remaining}]', desc='progress') as self.pbar:
 				
 				sol = solve_ivp(self._ff, t_span, q, t_eval=self.t_eval, jac=self._jj,
-								args=(T, network, applied_args, train, method, eta, alpha, vmin, vsmooth, pbar),
+								args=(T, fix.ravel(), network, applied_args, train, method, eta, alpha, vmin, vsmooth, symmetric, pbar),
 								method=integrator, rtol=rtol, atol=atol)
 
 		else:
 			sol = solve_ivp(self._ff, t_span, q, t_eval=self.t_eval, jac=self._jj,
-							args=(T, network, applied_args, train, method, eta, alpha, vmin, vsmooth, pbar),
+							args=(T, fix.ravel(), network, applied_args, train, method, eta, alpha, vmin, vsmooth, symmetric, pbar),
 							method=integrator, rtol=rtol, atol=atol)
 
 		if sol.status != 0:
@@ -344,6 +371,18 @@ class Elastic(object):
 
 				offset = 12*n
 
+				if symmetric:
+					self.traj_s = np.copy(q[:,12*n:15*n].reshape(frames+1, n, 3))
+					self.vtraj_s = np.copy(q[:,15*n:18*n].reshape(frames+1, n, 3))
+					self.pts_s = np.copy(self.traj_s[-1])
+					self.vel_s = np.copy(self.vtraj_s[-1])
+					self.traj_sc = np.copy(q[:,18*n:21*n].reshape(frames+1, n, 3))
+					self.vtraj_sc = np.copy(q[:,21*n:24*n].reshape(frames+1, n, 3))
+					self.pts_sc = np.copy(self.traj_sc[-1])
+					self.vel_sc = np.copy(self.vtraj_sc[-1])
+
+					offset += 12*n
+
 				if train & 1:
 					edge_l = q[-1,offset:offset+self.ne]
 					for e, edge in enumerate(self.graph.edges(data=True)):
@@ -362,6 +401,10 @@ class Elastic(object):
 				self.vel_c = np.copy(self.vel)
 				self.traj_c = np.copy(self.traj)
 				self.vtraj_c = np.copy(self.vtraj)
+				self.traj_s = np.copy(self.traj)
+				self.vtraj_s = np.copy(self.vtraj)
+				self.traj_sc = np.copy(self.traj)
+				self.vtraj_sc = np.copy(self.vtraj)
 				self.ltraj = np.tile(edge_l, (frames+1,1))
 				self.ktraj = np.tile(edge_k, (frames+1,1))
 
@@ -410,6 +453,7 @@ class Elastic(object):
 			Collection of simulation arguments :
 			
 			- T: Period for oscillatory force. If T = 0, nodes with an applied force are held stationary.
+			- fix: Boolean indicating which degrees of freedom are held fixed.
 			- network: Network edge properties obtained from _edge_lists().
 			- applied_args: Simulation arguments, which can vary by problem.
 			- train: The type of training to perform.
@@ -420,6 +464,7 @@ class Elastic(object):
 			- alpha: Learning rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
 			- vmin: The smallest allowed value for each learning degree of freedom.
 			- vsmooth: The value of each learning degree of freedom at which to begin smooth ramp down to vmin.
+			- symmetric: Whether to train symmetrically with an additional free and clamped state.
 			- pbar: Whether to display a progress bar. Default is True. 
 
 		Returns
@@ -428,11 +473,12 @@ class Elastic(object):
 			Total energy of the network.
 		'''
 
-		T, network, applied_args, train, method, eta, alpha, vmin, vsmooth, pbar = args
+		T, fix, network, applied_args, train, method, eta, alpha, vmin, vsmooth, symmetric, pbar = args
 		edge_i, edge_j, edge_k, edge_l, edge_t = network
 		n = self.n
 		ne = self.ne
 		offset = 12*n
+		if symmetric: offset += 12*n
 
 		if train & 1:
 			l = q[offset:offset+ne]
@@ -445,7 +491,7 @@ class Elastic(object):
 			k = edge_k
 
 		en = 0.
-		en += self._elastic_energy(t, n, q, l, k, network)
+		en += self._elastic_energy(t, n, q, k, l, network)
 		en += self._applied_energy(t, n, q, T, applied_args)
 		return en
 
@@ -465,6 +511,7 @@ class Elastic(object):
 			Collection of simulation arguments :
 			
 			- T: Period for oscillatory force. If T = 0, nodes with an applied force are held stationary.
+			- fix: Boolean indicating which degrees of freedom are held fixed.
 			- network: Network edge properties obtained from _edge_lists().
 			- applied_args: Simulation arguments, which can vary by problem.
 			- train: The type of training to perform.
@@ -475,6 +522,7 @@ class Elastic(object):
 			- alpha: Learning rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
 			- vmin: The smallest allowed value for each learning degree of freedom.
 			- vsmooth: The value of each learning degree of freedom at which to begin smooth ramp down to vmin.
+			- symmetric: Whether to train symmetrically with an additional free and clamped state.
 			- pbar: Whether to display a progress bar. Default is True. 
 
 		Returns
@@ -483,7 +531,7 @@ class Elastic(object):
 			Derivative of the degrees of freedom.
 		'''
 
-		T, network, applied_args, train, method, eta, alpha, vmin, vsmooth, pbar = args
+		T, fix, network, applied_args, train, method, eta, alpha, vmin, vsmooth, symmetric, pbar = args
 		edge_i, edge_j, edge_k, edge_l, edge_t = network
 		n = self.n
 		ne = self.ne
@@ -496,6 +544,15 @@ class Elastic(object):
 			fun_c = fun[6*n:12*n]
 			acc_c = fun_c[3*n:6*n]
 			offset = 12*n
+
+			if symmetric:
+				q_s = q[12*n:18*n]
+				fun_s = fun[12*n:18*n]
+				acc_s = fun_s[3*n:6*n]
+				q_sc = q[18*n:24*n]
+				fun_sc = fun[18*n:24*n]
+				acc_sc = fun_sc[3*n:6*n]
+				offset += 12*n
 
 			if train & 1:
 				l = q[offset:offset+ne]
@@ -512,14 +569,21 @@ class Elastic(object):
 			if train & 1:
 				if method == 'learning':
 					self._length_update_learning(t, n, q, q_c, k, l, dl, eta, alpha[0], vmin[0], vsmooth[0], network)
+					if symmetric:
+						self._length_update_learning(t, n, q_s, q_sc, k, l, dl, eta, alpha[0], vmin[0], vsmooth[0], network)
 				else:
 					self._length_update_aging(t, n, q, q_c, k, l, dl, eta, alpha[0], vmin[0], vsmooth[0], network)
-				
+					if symmetric:
+						self._length_update_aging(t, n, q_s, q_sc, k, l, dl, eta, alpha[0], vmin[0], vsmooth[0], network)
 			if train & 2:
 				if method == 'learning':
 					self._stiffness_update_learning(t, n, q, q_c, k, l, dk, eta, alpha[1], vmin[1], vsmooth[1], network)
+					if symmetric:
+						self._stiffness_update_learning(t, n, q_s, q_sc, k, l, dk, eta, alpha[1], vmin[1], vsmooth[1], network)
 				else:
 					self._stiffness_update_aging(t, n, q, q_c, k, l, dk, eta, alpha[1], vmin[1], vsmooth[1], network)
+					if symmetric:
+						self._stiffness_update_aging(t, n, q_s, q_sc, k, l, dk, eta, alpha[1], vmin[1], vsmooth[1], network)
 
 		else:
 			l = edge_l
@@ -528,18 +592,40 @@ class Elastic(object):
 		# base network
 		self._drag_force(t, n, q, fun, network, self.params['drag'])
 		self._dashpot_force(t, n, q, l, acc, network, self.params['dashpot'])
-		self._elastic_force(t, n, q, l, k, acc, network)
+		self._elastic_force(t, n, q, k, l, acc, network)
 
 		if train:
+
 			# clamped state
 			self._drag_force(t, n, q_c, fun_c, network, self.params['drag'])
 			self._dashpot_force(t, n, q_c, l, acc_c, network, self.params['dashpot'])
-			self._elastic_force(t, n, q_c, l, k, acc_c, network)
+			self._elastic_force(t, n, q_c, k, l, acc_c, network)
+			self._applied_force(t, n, q, q_c, acc, acc_c, T, applied_args, train, eta, False)
 
-			self._applied_force(t, n, q, q_c, acc, acc_c, T, applied_args, train, eta)
+			# zero out force on any fixed nodes
+			acc[fix] = 0.
+			acc_c[fix] = 0.
+
+			if symmetric:
+				# second free state
+				self._drag_force(t, n, q_s, fun_s, network, self.params['drag'])
+				self._dashpot_force(t, n, q_s, l, acc_s, network, self.params['dashpot'])
+				self._elastic_force(t, n, q_s, k, l, acc_s, network)
+				
+				# second clamped state
+				self._drag_force(t, n, q_sc, fun_sc, network, self.params['drag'])
+				self._dashpot_force(t, n, q_sc, l, acc_sc, network, self.params['dashpot'])
+				self._elastic_force(t, n, q_sc, k, l, acc_sc, network)
+				self._applied_force(t, n, q_s, q_sc, acc_s, acc_sc, T, applied_args, train, eta, symmetric)
+				
+				acc_s[fix] = 0.
+				acc_sc[fix] = 0.
+
 		else:
-			self._applied_force(t, n, q, q, acc, acc, T, applied_args, train, eta)
-
+			self._applied_force(t, n, q, q, acc, acc, T, applied_args, train, eta, False)
+			
+			# zero out force on any fixed nodes
+			acc[fix] = 0.
 
 		# update progress bar
 		if pbar:
@@ -562,6 +648,7 @@ class Elastic(object):
 			Collection of simulation arguments :
 			
 			- T: Period for oscillatory force. If T = 0, nodes with an applied force are held stationary.
+			- fix: Boolean indicating which degrees of freedom are held fixed.
 			- network: Network edge properties obtained from _edge_lists().
 			- applied_args: Simulation arguments, which can vary by problem.
 			- train: The type of training to perform.
@@ -572,6 +659,7 @@ class Elastic(object):
 			- alpha: Learning rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
 			- vmin: The smallest allowed value for each learning degree of freedom.
 			- vsmooth: The value of each learning degree of freedom at which to begin smooth ramp down to vmin.
+			- symmetric: Whether to train symmetrically with an additional free and clamped state.
 			- pbar: Whether to display a progress bar. Default is True. 
 
 		Returns
@@ -580,7 +668,7 @@ class Elastic(object):
 			Jacobian of the derivative.
 		'''
 
-		T, network, applied_args, train, method, eta, alpha, vmin, vsmooth, pbar = args
+		T, fix, network, applied_args, train, method, eta, alpha, vmin, vsmooth, symmetric, pbar = args
 		edge_i, edge_j, edge_k, edge_l, edge_t = network
 		n = self.n
 		ne = self.ne
@@ -598,16 +686,35 @@ class Elastic(object):
 			dfdx_c = jac[9*n:12*n,6*n:9*n]
 			dfdv_c = jac[9*n:12*n,9*n:12*n]
 			dfdx_f = jac[9*n:12*n,:3*n] # deriv of f_c with respect to x_f
-
 			offset = 12*n
+
+			if symmetric:
+				q_s = q[12*n:18*n]
+				q_sc = q[18*n:24*n]
+				for i in range(3*n):
+					jac[12*n+i,15*n+i] = 1
+					jac[18*n+i,21*n+i] = 1
+				dfdx_s = jac[15*n:18*n,12*n:15*n]
+				dfdv_s = jac[15*n:18*n,15*n:18*n]
+				dfdx_sc = jac[21*n:24*n,18*n:21*n]
+				dfdv_sc = jac[21*n:24*n,21*n:24*n]
+				dfdx_sf = jac[21*n:24*n,12*n:15*n] # deriv of f_sc with respect to x_sf
+				offset += 12*n
 
 			if train & 1:
 				l = q[offset:offset+ne]
 				dfdl = jac[3*n:6*n,offset:offset+ne]
-				dgldx = jac[offset:offset+ne,:3*n]
 				dfdl_c = jac[9*n:12*n,offset:offset+ne]
+				dgldx = jac[offset:offset+ne,:3*n]
 				dgldx_c = jac[offset:offset+ne,6*n:9*n]
 				dgldl = jac[offset:offset+ne,offset:offset+ne]
+
+				if symmetric:
+					dfdl_s = jac[15*n:18*n,offset:offset+ne]
+					dfdl_sc = jac[21*n:24*n,offset:offset+ne]
+					dgldx_s = jac[offset:offset+ne,12*n:15*n]
+					dgldx_sc = jac[offset:offset+ne,18*n:21*n]
+				
 				if train & 2:
 					dgldk = jac[offset:offset+ne,offset+ne:offset+2*ne]
 				else:
@@ -615,13 +722,21 @@ class Elastic(object):
 				offset += ne
 			else:
 				l = edge_l
+
 			if train & 2:
 				k = q[offset:offset+ne]
 				dfdk = jac[3*n:6*n,offset:offset+ne]
-				dgkdx = jac[offset:offset+ne,:3*n]
 				dfdk_c = jac[9*n:12*n,offset:offset+ne]
+				dgkdx = jac[offset:offset+ne,:3*n]
 				dgkdx_c = jac[offset:offset+ne,6*n:9*n]
 				dgkdk = jac[offset:offset+ne,offset:offset+ne]
+
+				if symmetric:
+					dfdk_s = jac[15*n:18*n,offset:offset+ne]
+					dfdk_sc = jac[21*n:24*n,offset:offset+ne]
+					dgkdx_s = jac[offset:offset+ne,12*n:15*n]
+					dgkdx_sc = jac[offset:offset+ne,18*n:21*n]
+
 				if train & 1:
 					dgkdl = jac[offset:offset+ne,offset-ne:offset]
 				else:
@@ -631,15 +746,49 @@ class Elastic(object):
 
 			if train & 1:
 				if method == 'learning':
-					self._length_jacobian_learning(t, n, q, q_c, k, l, dfdl, dgldx, dfdl_c, dgldx_c, dgldk, dgldl, eta, alpha[0], vmin[0], vsmooth[0], network)
+					self._length_jacobian_learning(t, n, q, q_c, k, l, dgldx, dgldx_c, dgldk, dgldl, eta, alpha[0], vmin[0], vsmooth[0], network)
+					if symmetric:
+						self._length_jacobian_learning(t, n, q_s, q_sc, k, l, dgldx_s, dgldx_sc, dgldk, dgldl, eta, alpha[0], vmin[0], vsmooth[0], network)
 				else:
-					self._length_jacobian_aging(t, n, q, q_c, k, l, dfdl, dgldx, dfdl_c, dgldx_c, dgldk, dgldl, eta, alpha[0], vmin[0], vsmooth[0], network)
+					self._length_jacobian_aging(t, n, q, q_c, k, l, dgldx, dgldx_c, dgldk, dgldl, eta, alpha[0], vmin[0], vsmooth[0], network)
+					if symmetric:
+						self._length_jacobian_aging(t, n, q_s, q_sc, k, l, dgldx_s, dgldx_sc, dgldk, dgldl, eta, alpha[0], vmin[0], vsmooth[0], network)
 				
+				self._length_jacobian(t, n, q, k, l, dfdl, network)
+				self._length_jacobian(t, n, q_c, k, l, dfdl_c, network)
+
+				if symmetric:
+					self._length_jacobian(t, n, q_s, k, l, dfdl_s, network)
+					self._length_jacobian(t, n, q_sc, k, l, dfdl_sc, network)
+					dfdl_s[fix] = 0.
+					dfdl_sc[fix] = 0.
+				
+				# zero out jacobian for any fixed nodes
+				dfdl[fix] = 0.
+				dfdl_c[fix] = 0.
+
 			if train & 2:
 				if method == 'learning':
-					self._stiffness_jacobian_learning(t, n, q, q_c, k, l, dfdk, dgkdx, dfdk_c, dgkdx_c, dgkdk, dgkdl, eta, alpha[1], vmin[1], vsmooth[1], network)
+					self._stiffness_jacobian_learning(t, n, q, q_c, k, l, dgkdx, dgkdx_c, dgkdk, dgkdl, eta, alpha[1], vmin[1], vsmooth[1], network)
+					if symmetric:
+						self._stiffness_jacobian_learning(t, n, q_s, q_sc, k, l, dgkdx_s, dgkdx_sc, dgkdk, dgkdl, eta, alpha[1], vmin[1], vsmooth[1], network)
 				else:
-					self._stiffness_jacobian_aging(t, n, q, q_c, k, l, dfdk, dgkdx, dfdk_c, dgkdx_c, dgkdk, dgkdl, eta, alpha[1], vmin[1], vsmooth[1], network)
+					self._stiffness_jacobian_aging(t, n, q, q_c, k, l, dgkdx, dgkdx_c, dgkdk, dgkdl, eta, alpha[1], vmin[1], vsmooth[1], network)
+					if symmetric:
+						self._stiffness_jacobian_aging(t, n, q_s, q_sc, k, l, dgkdx_s, dgkdx_sc, dgkdk, dgkdl, eta, alpha[1], vmin[1], vsmooth[1], network)
+
+				self._stiffness_jacobian(t, n, q, k, l, dfdk, network)
+				self._stiffness_jacobian(t, n, q_c, k, l, dfdk_c, network)
+
+				if symmetric:
+					self._stiffness_jacobian(t, n, q_s, k, l, dfdk_s, network)
+					self._stiffness_jacobian(t, n, q_sc, k, l, dfdk_sc, network)
+					dfdk_s[fix] = 0.
+					dfdk_sc[fix] = 0.
+
+				# zero out jacobian for any fixed nodes
+				dfdk[fix] = 0.
+				dfdk_c[fix] = 0.
 
 		else:
 			l = edge_l
@@ -648,24 +797,54 @@ class Elastic(object):
 		# base network
 		self._drag_jacobian(t, n, q, dfdv, network, self.params['drag'])
 		self._dashpot_jacobian(t, n, q, l, dfdx, dfdv, network, self.params['dashpot'])
-		self._elastic_jacobian(t, n, q, l, k, dfdx, network)
+		self._elastic_jacobian(t, n, q, k, l, dfdx, network)
 
 		if train:
 			# clamped state
 			self._drag_jacobian(t, n, q_c, dfdv_c, network, self.params['drag'])
 			self._dashpot_jacobian(t, n, q_c, l, dfdx_c, dfdv_c, network, self.params['dashpot'])
-			self._elastic_jacobian(t, n, q_c, l, k, dfdx_c, network)
+			self._elastic_jacobian(t, n, q_c, k, l, dfdx_c, network)
+			self._applied_jacobian(t, n, q, q_c, dfdx, dfdx_c, dfdx_f, T, applied_args, train, eta, False)
 
-			self._applied_jacobian(t, n, q, q_c, dfdx, dfdx_c, dfdx_f, T, applied_args, train, eta)
+			if symmetric:
+				# second free state
+				self._drag_jacobian(t, n, q_s, dfdv_s, network, self.params['drag'])
+				self._dashpot_jacobian(t, n, q_s, l, dfdx_s, dfdv_s, network, self.params['dashpot'])
+				self._elastic_jacobian(t, n, q_s, k, l, dfdx_s, network)
+				
+				# second clamped state
+				self._drag_jacobian(t, n, q_sc, dfdv_sc, network, self.params['drag'])
+				self._dashpot_jacobian(t, n, q_sc, l, dfdx_sc, dfdv_sc, network, self.params['dashpot'])
+				self._elastic_jacobian(t, n, q_sc, k, l, dfdx_sc, network)
+				self._applied_jacobian(t, n, q_s, q_sc, dfdx_s, dfdx_sc, dfdx_sf, T, applied_args, train, eta, symmetric)
+				
+				dfdx_s[fix] = 0.; dfdx_s[:,fix] = 0.
+				dfdv_s[fix] = 0.; dfdv_s[:,fix] = 0.
+				dfdx_sc[fix] = 0.; dfdx_sc[:,fix] = 0.
+				dfdv_sc[fix] = 0.; dfdv_sc[:,fix] = 0.
+				dfdx_sf[fix] = 0.; dfdx_sf[:,fix] = 0.
+				
+
+			# zero out jacobian for any fixed nodes
+			dfdx[fix] = 0.; dfdx[:,fix] = 0.
+			dfdv[fix] = 0.; dfdv[:,fix] = 0.
+			dfdx_c[fix] = 0.; dfdx_c[:,fix] = 0.
+			dfdv_c[fix] = 0.; dfdv_c[:,fix] = 0.
+			dfdx_f[fix] = 0.; dfdx_f[:,fix] = 0.
+
 		else:
-			self._applied_jacobian(t, n, q, q, dfdx, dfdx, dfdx, T, applied_args, train, eta)
+			self._applied_jacobian(t, n, q, q, dfdx, dfdx, dfdx, T, applied_args, train, eta, False)
+
+			# zero out jacobian for any fixed nodes
+			dfdx[fix] = 0.; dfdx[:,fix] = 0.
+			dfdv[fix] = 0.; dfdv[:,fix] = 0.
 
 		return jac
 
-	def _applied_force(self, t, n, q, q_c, acc, acc_c, T, applied_args, train, eta):
+	def _applied_force(self, t, n, q, q_c, acc, acc_c, T, applied_args, train, eta, symmetric):
 		raise NotImplementedError
 
-	def _applied_jacobian(self, t, n, q, q_c, dfdx, dfdx_c, dfdx_f, T, applied_args, train, eta):
+	def _applied_jacobian(self, t, n, q, q_c, dfdx, dfdx_c, dfdx_f, T, applied_args, train, eta, symmetric):
 		raise NotImplementedError
 
 	@staticmethod
@@ -726,7 +905,7 @@ class Elastic(object):
 
 	@staticmethod
 	@jit(nopython=True)
-	def _elastic_energy(t, n, q, l, k, network):
+	def _elastic_energy(t, n, q, k, l, network):
 		'''Compute the energy contribution due to pairwise interactions of bonded nodes.
 
 		Parameters
@@ -737,11 +916,11 @@ class Elastic(object):
 			The number of nodes.
 		q : ndarray
 			The positions of the nodes.
-		l : ndarray
-			The rest length of each bond. Different from network lists if it is a
-			learning degree of freedom.
 		k : ndarray
 			The stiffness of each bond. Different from network lists if it is a
+			learning degree of freedom.
+		l : ndarray
+			The rest length of each bond. Different from network lists if it is a
 			learning degree of freedom.
 		network : tuple of ndarrays
 			Network edge properties obtained from _edge_lists().
@@ -764,7 +943,7 @@ class Elastic(object):
 
 	@staticmethod
 	@jit(nopython=True)
-	def _elastic_force(t, n, q, l, k, acc, network):
+	def _elastic_force(t, n, q, k, l, acc, network):
 		'''Apply elastic forces between bonded nodes.
 
 		Parameters
@@ -775,11 +954,11 @@ class Elastic(object):
 			The number of nodes.
 		q : ndarray
 			The positions of the nodes.
-		l : ndarray
-			The rest length of each bond. Different from network lists if it is a
-			learning degree of freedom.
 		k : ndarray
 			The stiffness of each bond. Different from network lists if it is a
+			learning degree of freedom.
+		l : ndarray
+			The rest length of each bond. Different from network lists if it is a
 			learning degree of freedom.
 		acc : ndarray
 			The acceleration of each node, populated as output.
@@ -802,7 +981,7 @@ class Elastic(object):
 
 	@staticmethod
 	@jit(nopython=True)
-	def _elastic_jacobian(t, n, q, l, k, jac, network):
+	def _elastic_jacobian(t, n, q, k, l, jac, network):
 		'''Compute the jacobian of elastic forces between bonded nodes.
 
 		Parameters
@@ -813,11 +992,11 @@ class Elastic(object):
 			The number of nodes.
 		q : ndarray
 			The positions of the nodes.
-		l : ndarray
-			The rest length of each bond. Different from network lists if it is a
-			learning degree of freedom.
 		k : ndarray
 			The stiffness of each bond. Different from network lists if it is a
+			learning degree of freedom.
+		l : ndarray
+			The rest length of each bond. Different from network lists if it is a
 			learning degree of freedom.
 		jac :ndarray
 			The jacobian of elastic forces, populated as output.
@@ -1060,6 +1239,88 @@ class Elastic(object):
 			jacv[3*i+2,3*j+1] -= vyz # ziyj
 			jacv[3*j+2,3*i+1] -= vyz # zjyi
 
+
+	@staticmethod
+	@jit(nopython=True)
+	def _length_jacobian(t, n, q, k, l, dfdl, network):
+		'''Compute the jacobian of elastic forces due to changes in stiffness.
+
+		Parameters
+		----------
+		t : float
+			The current time.
+		n : int
+			The number of nodes.
+		q : ndarray
+			The positions of the nodes.
+		k : ndarray
+			The stiffness of each bond. Different from network lists if it is a
+			learning degree of freedom.
+		l : ndarray
+			The rest length of each bond. Different from network lists if it is a
+			learning degree of freedom.
+		dfdl :ndarray
+			The jacobian of elastic forces, populated as output.
+		network : tuple of ndarrays
+			Network edge properties obtained from _edge_lists().
+		'''
+
+		edge_i, edge_j, edge_k, edge_l, edge_t = network
+		for e,(i, j) in enumerate(zip(edge_i, edge_j)):
+			xi, yi, zi = q[3*i], q[3*i+1], q[3*i+2]
+			xj, yj, zj = q[3*j], q[3*j+1], q[3*j+2]
+			dx = xi-xj; dy = yi-yj; dz = zi-zj
+			r = np.sqrt(dx**2 + dy**2 + dz**2)
+			rfac = k[e]/r
+
+			dfdl[3*i,e] += rfac*dx
+			dfdl[3*i+1,e] += rfac*dy
+			dfdl[3*i+2,e] += rfac*dz
+			dfdl[3*j,e] += -rfac*dx
+			dfdl[3*j+1,e] += -rfac*dy
+			dfdl[3*j+2,e] += -rfac*dz
+
+	@staticmethod
+	@jit(nopython=True)
+	def _stiffness_jacobian(t, n, q, k, l, dfdk, network):
+		'''Compute the jacobian of elastic forces due to changes in stiffness.
+
+		Parameters
+		----------
+		t : float
+			The current time.
+		n : int
+			The number of nodes.
+		q : ndarray
+			The positions of the nodes.
+		k : ndarray
+			The stiffness of each bond. Different from network lists if it is a
+			learning degree of freedom.
+		l : ndarray
+			The rest length of each bond. Different from network lists if it is a
+			learning degree of freedom.
+		dfdk :ndarray
+			The jacobian of elastic forces, populated as output.
+		network : tuple of ndarrays
+			Network edge properties obtained from _edge_lists().
+		'''
+
+		edge_i, edge_j, edge_k, edge_l, edge_t = network
+		for e,(i, j) in enumerate(zip(edge_i, edge_j)):
+			xi, yi, zi = q[3*i], q[3*i+1], q[3*i+2]
+			xj, yj, zj = q[3*j], q[3*j+1], q[3*j+2]
+			dx = xi-xj; dy = yi-yj; dz = zi-zj
+			r = np.sqrt(dx**2 + dy**2 + dz**2)
+			rfac = (1 - l[e]/r)
+
+			dfdk[3*i,e] += -rfac*dx
+			dfdk[3*i+1,e] += -rfac*dy
+			dfdk[3*i+2,e] += -rfac*dz
+			dfdk[3*j,e] += rfac*dx
+			dfdk[3*j+1,e] += rfac*dy
+			dfdk[3*j+2,e] += rfac*dz
+
+
 	@staticmethod
 	@jit(nopython=True)
 	def _length_update_learning(t, n, q, q_c, k, l, dl, eta, alpha, lmin, lsmooth, network):
@@ -1112,11 +1373,11 @@ class Elastic(object):
 				if s < 0: s = 0
 				if s > 1: s = 1
 				sf = s*s*s*(s*(s*6-15)+10)
-				dl[e] = -alpha/eta*k[e]*(r-r_c)*sf
+				dl[e] += -alpha/eta*k[e]*(r-r_c)*sf
 
 	@staticmethod
 	@jit(nopython=True)
-	def _length_jacobian_learning(t, n, q, q_c, k, l, dfdl, dgdx, dfdl_c, dgdx_c, dgdk, dgdl, eta, alpha, lmin, lsmooth, network):
+	def _length_jacobian_learning(t, n, q, q_c, k, l, dgdx, dgdx_c, dgdk, dgdl, eta, alpha, lmin, lsmooth, network):
 		'''Jacobian for edge length update.
 		
 		Parameters
@@ -1133,12 +1394,8 @@ class Elastic(object):
 			The stiffness of each bond.
 		l : ndarray
 			The rest length of each bond.
-		dfdl : ndarray
-			Memory for storing the derivative of the elastic forces with respect to rest length in the free state.
 		dgdx : ndarray
 			Memory for storing derivative of the learning rule with respect to free state positions.
-		dfdl_c : ndarray
-			Memory for storing the derivative of the elastic forces with respect to rest length in the clamped state.
 		dgdx_c : ndarray
 			Memory for storing the derivative of the learning rule with respect to clamped state positions.
 		dgdk : ndarray
@@ -1179,39 +1436,23 @@ class Elastic(object):
 				dsf = 30*s*s*(s*(s-2)+1)/(lsmooth-lmin)
 
 				fac = -alpha/eta*k[e]*sf
-				rfac = k[e]/r
-				rfac_c = k[e]/r_c
 
-				dgdx[e,3*i] = fac/r*dx
-				dgdx[e,3*i+1] = fac/r*dy
-				dgdx[e,3*i+2] = fac/r*dz
-				dgdx[e,3*j] = -fac/r*dx
-				dgdx[e,3*j+1] = -fac/r*dy
-				dgdx[e,3*j+2] = -fac/r*dz
+				dgdx[e,3*i] += fac/r*dx
+				dgdx[e,3*i+1] += fac/r*dy
+				dgdx[e,3*i+2] += fac/r*dz
+				dgdx[e,3*j] += -fac/r*dx
+				dgdx[e,3*j+1] += -fac/r*dy
+				dgdx[e,3*j+2] += -fac/r*dz
 
-				dgdx_c[e,3*i] = -fac/r_c*dx_c
-				dgdx_c[e,3*i+1] = -fac/r_c*dy_c
-				dgdx_c[e,3*i+2] = -fac/r_c*dz_c
-				dgdx_c[e,3*j] = fac/r_c*dx_c
-				dgdx_c[e,3*j+1] = fac/r_c*dy_c
-				dgdx_c[e,3*j+2] = fac/r_c*dz_c
+				dgdx_c[e,3*i] += -fac/r_c*dx_c
+				dgdx_c[e,3*i+1] += -fac/r_c*dy_c
+				dgdx_c[e,3*i+2] += -fac/r_c*dz_c
+				dgdx_c[e,3*j] += fac/r_c*dx_c
+				dgdx_c[e,3*j+1] += fac/r_c*dy_c
+				dgdx_c[e,3*j+2] += fac/r_c*dz_c
 
-				dfdl[3*i,e] = rfac*dx
-				dfdl[3*i+1,e] = rfac*dy
-				dfdl[3*i+2,e] = rfac*dz
-				dfdl[3*j,e] = -rfac*dx
-				dfdl[3*j+1,e] = -rfac*dy
-				dfdl[3*j+2,e] = -rfac*dz
-
-				dfdl_c[3*i,e] = rfac_c*dx_c
-				dfdl_c[3*i+1,e] = rfac_c*dy_c
-				dfdl_c[3*i+2,e] = rfac_c*dz_c
-				dfdl_c[3*j,e] = -rfac_c*dx_c
-				dfdl_c[3*j+1,e] = -rfac_c*dy_c
-				dfdl_c[3*j+2,e] = -rfac_c*dz_c
-
-				dgdk[e,e] = -alpha/eta*(r-r_c)*sf
-				dgdl[e,e] = -alpha/eta*k[e]*(r-r_c)*dsf
+				dgdk[e,e] += -alpha/eta*(r-r_c)*sf
+				dgdl[e,e] += -alpha/eta*k[e]*(r-r_c)*dsf
 
 	@staticmethod
 	@jit(nopython=True)
@@ -1259,11 +1500,11 @@ class Elastic(object):
 				if s < 0: s = 0
 				if s > 1: s = 1
 				sf = s*s*s*(s*(s*6-15)+10)
-				dl[e] = alpha/eta*k[e]*(r_c-l[e])*sf
+				dl[e] += alpha/eta*k[e]*(r_c-l[e])*sf
 
 	@staticmethod
 	@jit(nopython=True)
-	def _length_jacobian_aging(t, n, q, q_c, k, l, dfdl, dgdx, dfdl_c, dgdx_c, dgdk, dgdl, eta, alpha, lmin, lsmooth, network):
+	def _length_jacobian_aging(t, n, q, q_c, k, l, dgdx, dgdx_c, dgdk, dgdl, eta, alpha, lmin, lsmooth, network):
 		'''Jacobian for edge length update.
 		
 		Parameters
@@ -1280,12 +1521,8 @@ class Elastic(object):
 			The stiffness of each bond.
 		l : ndarray
 			The rest length of each bond.
-		dfdl : ndarray
-			Memory for storing the derivative of the elastic forces with respect to rest length in the free state.
 		dgdx : ndarray
 			Memory for storing derivative of the learning rule with respect to free state positions.
-		dfdl_c : ndarray
-			Memory for storing the derivative of the elastic forces with respect to rest length in the clamped state.
 		dgdx_c : ndarray
 			Memory for storing the derivative of the learning rule with respect to clamped state positions.
 		dgdk : ndarray
@@ -1326,32 +1563,16 @@ class Elastic(object):
 				dsf = 30*s*s*(s*(s-2)+1)/(lsmooth-lmin)
 
 				fac = alpha/eta*k[e]*sf
-				rfac = k[e]/r
-				rfac_c = k[e]/r_c
 
-				dgdx_c[e,3*i] = fac/r_c*dx_c
-				dgdx_c[e,3*i+1] = fac/r_c*dy_c
-				dgdx_c[e,3*i+2] = fac/r_c*dz_c
-				dgdx_c[e,3*j] = -fac/r_c*dx_c
-				dgdx_c[e,3*j+1] = -fac/r_c*dy_c
-				dgdx_c[e,3*j+2] = -fac/r_c*dz_c
+				dgdx_c[e,3*i] += fac/r_c*dx_c
+				dgdx_c[e,3*i+1] += fac/r_c*dy_c
+				dgdx_c[e,3*i+2] += fac/r_c*dz_c
+				dgdx_c[e,3*j] += -fac/r_c*dx_c
+				dgdx_c[e,3*j+1] += -fac/r_c*dy_c
+				dgdx_c[e,3*j+2] += -fac/r_c*dz_c
 
-				dfdl[3*i,e] = rfac*dx
-				dfdl[3*i+1,e] = rfac*dy
-				dfdl[3*i+2,e] = rfac*dz
-				dfdl[3*j,e] = -rfac*dx
-				dfdl[3*j+1,e] = -rfac*dy
-				dfdl[3*j+2,e] = -rfac*dz
-
-				dfdl_c[3*i,e] = rfac_c*dx_c
-				dfdl_c[3*i+1,e] = rfac_c*dy_c
-				dfdl_c[3*i+2,e] = rfac_c*dz_c
-				dfdl_c[3*j,e] = -rfac_c*dx_c
-				dfdl_c[3*j+1,e] = -rfac_c*dy_c
-				dfdl_c[3*j+2,e] = -rfac_c*dz_c
-
-				dgdk[e,e] = alpha/eta*(r_c-l[e])*sf
-				dgdl[e,e] = alpha/eta*k[e]*(-sf + (r_c-l[e])*dsf)
+				dgdk[e,e] += alpha/eta*(r_c-l[e])*sf
+				dgdl[e,e] += alpha/eta*k[e]*(-sf + (r_c-l[e])*dsf)
 
 	@staticmethod
 	@jit(nopython=True)
@@ -1406,11 +1627,11 @@ class Elastic(object):
 				if s < 0: s = 0
 				if s > 1: s = 1
 				sf = s*s*s*(s*(s*6-15)+10)
-				dk[e] = 0.5*alpha/eta*((r-l[e])**2-(r_c-l[e])**2)*sf
+				dk[e] += 0.5*alpha/eta*((r-l[e])**2-(r_c-l[e])**2)*sf
 
 	@staticmethod
 	@jit(nopython=True)
-	def _stiffness_jacobian_learning(t, n, q, q_c, k, l, dfdk, dgdx, dfdk_c, dgdx_c, dgdk, dgdl, eta, alpha, kmin, ksmooth, network):
+	def _stiffness_jacobian_learning(t, n, q, q_c, k, l, dgdx, dgdx_c, dgdk, dgdl, eta, alpha, kmin, ksmooth, network):
 		'''Jacobian for stiffness udpate.
 		
 		Parameters
@@ -1427,12 +1648,8 @@ class Elastic(object):
 			The stiffness of each bond.
 		l : ndarray
 			The length of each bond.
-		dfdk : ndarray
-			Memory for storing the derivative of the elastic forces with respect to stiffness in the free state.
 		dgdx : ndarray
 			Memory for storing derivative of the learning rule with respect to free state positions.
-		dfdk_c : ndarray
-			Memory for storing the derivative of the elastic forces with respect to stiffness in the clamped state.
 		dgdx_c : ndarray
 			Memory for storing the derivative of the learning rule with respect to clamped state positions.
 		dgdk : ndarray
@@ -1476,36 +1693,22 @@ class Elastic(object):
 				rfac = (1 - l[e]/r)
 				rfac_c = (1 - l[e]/r_c)
 
-				dgdx[e,3*i] = fac*rfac*dx
-				dgdx[e,3*i+1] = fac*rfac*dy
-				dgdx[e,3*i+2] = fac*rfac*dz
-				dgdx[e,3*j] = -fac*rfac*dx
-				dgdx[e,3*j+1] = -fac*rfac*dy
-				dgdx[e,3*j+2] = -fac*rfac*dz
+				dgdx[e,3*i] += fac*rfac*dx
+				dgdx[e,3*i+1] += fac*rfac*dy
+				dgdx[e,3*i+2] += fac*rfac*dz
+				dgdx[e,3*j] += -fac*rfac*dx
+				dgdx[e,3*j+1] += -fac*rfac*dy
+				dgdx[e,3*j+2] += -fac*rfac*dz
 
-				dgdx_c[e,3*i] = -fac*rfac_c*dx_c
-				dgdx_c[e,3*i+1] = -fac*rfac_c*dy_c
-				dgdx_c[e,3*i+2] = -fac*rfac_c*dz_c
-				dgdx_c[e,3*j] = fac*rfac_c*dx_c
-				dgdx_c[e,3*j+1] = fac*rfac_c*dy_c
-				dgdx_c[e,3*j+2] = fac*rfac_c*dz_c
+				dgdx_c[e,3*i] += -fac*rfac_c*dx_c
+				dgdx_c[e,3*i+1] += -fac*rfac_c*dy_c
+				dgdx_c[e,3*i+2] += -fac*rfac_c*dz_c
+				dgdx_c[e,3*j] += fac*rfac_c*dx_c
+				dgdx_c[e,3*j+1] += fac*rfac_c*dy_c
+				dgdx_c[e,3*j+2] += fac*rfac_c*dz_c
 
-				dfdk[3*i,e] = -rfac*dx
-				dfdk[3*i+1,e] = -rfac*dy
-				dfdk[3*i+2,e] = -rfac*dz
-				dfdk[3*j,e] = rfac*dx
-				dfdk[3*j+1,e] = rfac*dy
-				dfdk[3*j+2,e] = rfac*dz
-
-				dfdk_c[3*i,e] = -rfac_c*dx_c
-				dfdk_c[3*i+1,e] = -rfac_c*dy_c
-				dfdk_c[3*i+2,e] = -rfac_c*dz_c
-				dfdk_c[3*j,e] = rfac_c*dx_c
-				dfdk_c[3*j+1,e] = rfac_c*dy_c
-				dfdk_c[3*j+2,e] = rfac_c*dz_c
-
-				dgdk[e,e] = 0.5*alpha/eta*((r-l[e])**2-(r_c-l[e])**2)*dsf
-				dgdl[e,e] = -alpha/eta*(r-r_c)*sf
+				dgdk[e,e] += 0.5*alpha/eta*((r-l[e])**2-(r_c-l[e])**2)*dsf
+				dgdl[e,e] += -alpha/eta*(r-r_c)*sf
 
 	@staticmethod
 	@jit(nopython=True)
@@ -1553,11 +1756,11 @@ class Elastic(object):
 				if s < 0: s = 0
 				if s > 1: s = 1
 				sf = s*s*s*(s*(s*6-15)+10)
-				dk[e] = -(alpha/eta*k[e]*(r_c-l[e])**2)*sf
+				dk[e] += -(alpha/eta*k[e]*(r_c-l[e])**2)*sf
 
 	@staticmethod
 	@jit(nopython=True)
-	def _stiffness_jacobian_aging(t, n, q, q_c, k, l, dfdk, dgdx, dfdk_c, dgdx_c, dgdk, dgdl, eta, alpha, kmin, ksmooth, network):
+	def _stiffness_jacobian_aging(t, n, q, q_c, k, l, dgdx, dgdx_c, dgdk, dgdl, eta, alpha, kmin, ksmooth, network):
 		'''Jacobian for stiffness update.
 		
 		Parameters
@@ -1574,12 +1777,8 @@ class Elastic(object):
 			The stiffness of each bond.
 		l : ndarray
 			The length of each bond.
-		dfdk : ndarray
-			Memory for storing the derivative of the elastic forces with respect to stiffness in the free state.
 		dgdx : ndarray
 			Memory for storing derivative of the learning rule with respect to free state positions.
-		dfdk_c : ndarray
-			Memory for storing the derivative of the elastic forces with respect to stiffness in the clamped state.
 		dgdx_c : ndarray
 			Memory for storing the derivative of the learning rule with respect to clamped state positions.
 		dgdk : ndarray
@@ -1620,32 +1819,17 @@ class Elastic(object):
 				dsf = 30*s*s*(s*(s-2)+1)/(ksmooth-kmin)
 
 				fac = 2*alpha/eta*k[e]*sf
-				rfac = (1 - l[e]/r)
 				rfac_c = (1 - l[e]/r_c)
 
-				dgdx_c[e,3*i] = -fac*rfac_c*dx_c
-				dgdx_c[e,3*i+1] = -fac*rfac_c*dy_c
-				dgdx_c[e,3*i+2] = -fac*rfac_c*dz_c
-				dgdx_c[e,3*j] = fac*rfac_c*dx_c
-				dgdx_c[e,3*j+1] = fac*rfac_c*dy_c
-				dgdx_c[e,3*j+2] = fac*rfac_c*dz_c
+				dgdx_c[e,3*i] += -fac*rfac_c*dx_c
+				dgdx_c[e,3*i+1] += -fac*rfac_c*dy_c
+				dgdx_c[e,3*i+2] += -fac*rfac_c*dz_c
+				dgdx_c[e,3*j] += fac*rfac_c*dx_c
+				dgdx_c[e,3*j+1] += fac*rfac_c*dy_c
+				dgdx_c[e,3*j+2] += fac*rfac_c*dz_c
 
-				dfdk[3*i,e] = -rfac*dx
-				dfdk[3*i+1,e] = -rfac*dy
-				dfdk[3*i+2,e] = -rfac*dz
-				dfdk[3*j,e] = rfac*dx
-				dfdk[3*j+1,e] = rfac*dy
-				dfdk[3*j+2,e] = rfac*dz
-
-				dfdk_c[3*i,e] = -rfac_c*dx_c
-				dfdk_c[3*i+1,e] = -rfac_c*dy_c
-				dfdk_c[3*i+2,e] = -rfac_c*dz_c
-				dfdk_c[3*j,e] = rfac_c*dx_c
-				dfdk_c[3*j+1,e] = rfac_c*dy_c
-				dfdk_c[3*j+2,e] = rfac_c*dz_c
-
-				dgdk[e,e] = -(alpha/eta*(r_c-l[e])**2)*(sf +k[e]*dsf)
-				dgdl[e,e] = 2*(alpha/eta*k[e]*(r_c-l[e]))*sf
+				dgdk[e,e] += -(alpha/eta*(r_c-l[e])**2)*(sf +k[e]*dsf)
+				dgdl[e,e] += 2*(alpha/eta*k[e]*(r_c-l[e]))*sf
 
 	def _sine_pulse(self, t, T):
 		'''A sine pulse in time.
@@ -1735,7 +1919,7 @@ class Elastic(object):
 		edge_i, edge_j, edge_k, edge_l, edge_t = self._edge_lists()
 		network = (edge_i, edge_j, edge_k, edge_l, edge_t)
 
-		self._elastic_jacobian(t, self.n, q, edge_l, edge_k, hess, network)
+		self._elastic_jacobian(t, self.n, q, edge_k, edge_l, hess, network)
 		
 		hess = hess[mask]
 		hess = hess.T[mask].T
@@ -1792,6 +1976,25 @@ class Elastic(object):
 		# mean square displacement over all particles in nodes.
 		l_ms = np.mean(msd[nodes])
 		return l_ms
+
+	def _rigidity_pair(self, q, R, e, i, j):
+		xi, yi, zi = q[3*i], q[3*i+1], q[3*i+2]
+		xj, yj, zj = q[3*j], q[3*j+1], q[3*j+2]
+		dx = xi-xj; dy = yi-yj; dz = zi-zj
+		r = np.sqrt(dx**2 + dy**2 + dz**2)
+		R[e,3*i] = dx/r; R[e,3*i+1] = dy/r; R[e,3*i+2] = dz/r
+		R[e,3*j] = -dx/r; R[e,3*j+1] = -dy/r; R[e,3*j+2] = -dz/r
+
+	def _pre_stress(self, q, Kp, Gx, Gy, Gz, e, i, j, k, l):
+		xi, yi, zi = q[3*i], q[3*i+1], q[3*i+2]
+		xj, yj, zj = q[3*j], q[3*j+1], q[3*j+2]
+		dx = xi-xj; dy = yi-yj; dz = zi-zj
+		r = np.sqrt(dx**2 + dy**2 + dz**2)
+		tau = -k*(r-l) # tension (compression is positive)
+		Kp[e,e] = tau/r
+		Gx[e,3*i] = 1; Gx[e,3*j] = -1
+		Gy[e,3*i+1] = 1; Gy[e,3*j+1] = -1
+		Gz[e,3*i+2] = 1; Gz[e,3*j+2] = -1
 
 	'''
 	*****************************************************************************************************
@@ -1868,9 +2071,10 @@ class Elastic(object):
 
 	def reset_view(self):
 		'''Reset the 3D view orientation.'''
+		lx, ly, lz = np.max(self.pts, axis=0) - np.min(self.pts, axis=0)
 		self._povray_props = {'light1':np.array([-10,10,10]),
 							  'light2':np.array([10,10,10]),
-							  'camera':np.array([0,0.75,0.25])}
+							  'camera':np.array([1.25*lx,1.25*ly,1*lz])}
 
 	def _povray_setup(self, R=np.eye(3)):
 		bg = Background("color", [1.0,1.0,1.0])

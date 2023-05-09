@@ -9,6 +9,7 @@ from matplotlib import collections  as mc
 import matplotlib.animation as animation
 
 from scipy.spatial import Voronoi, voronoi_plot_2d, Delaunay
+from scipy.interpolate import griddata, CloughTocher2DInterpolator
 
 import networkx as nx
 from vapory import *
@@ -40,8 +41,6 @@ class Allosteric(Elastic):
 		be updated during training.
 	dim : int
 		The dimensionality of the system. Valid options are 2 and 3.
-	seed : int
-		A random seed used for selecting sources and targets at random.
 	n : int
 		Number of nodes in the network.
 	ne : int
@@ -426,7 +425,7 @@ class Allosteric(Elastic):
 		float
 			The averaged distance between the two edges.
 		'''
-		dii = nx.shortest_path_length(self.graph, e0[0], e1[0], weight='length')
+		dii = nx.shortest_path_length(self.graph,e0[0],e1[0], weight='length')
 		dij = nx.shortest_path_length(self.graph,e0[0],e1[1], weight='length')
 		dji = nx.shortest_path_length(self.graph,e0[1],e1[0], weight='length')
 		djj = nx.shortest_path_length(self.graph,e0[1],e1[1], weight='length')
@@ -601,7 +600,7 @@ class Allosteric(Elastic):
 				en += self._applied_strain_energy(t, n, q, (i, j, et, k, l0, phase, T))
 		return en
 
-	def _applied_force(self, t, n, q, q_c, acc, acc_c, T, applied_args, train, eta):
+	def _applied_force(self, t, n, q, q_c, acc, acc_c, T, applied_args, train, eta, symmetric):
 		'''Compute the applied force at the source(s) and target(s).
 		
 		Parameters
@@ -629,6 +628,8 @@ class Allosteric(Elastic):
 			The type of training to perform. If train = 0 (default), no training is done.
 		eta : float
 			Learning rate by which to increment clamped strain towards the target.
+		symmetric : bool
+			Whether to train symmetrically with source and target roles reversed.
 		'''
 
 		ess, ets, k = applied_args
@@ -640,8 +641,14 @@ class Allosteric(Elastic):
 			if np.abs(es) > 0:
 				i, j, l0, phase = source['i'], source['j'], source['length'], source['phase']
 				if train:
-					self._applied_strain_force(t, n, q, acc, (i, j, es, k, l0, phase, T))
-					self._applied_strain_force(t, n, q_c, acc_c, (i, j, es, k, l0, phase, T))
+					if symmetric:
+						l = np.sqrt((q[3*i]-q[3*j])**2+(q[3*i+1]-q[3*j+1])**2+(q[3*i+2]-q[3*j+2])**2)
+						ef = (l - l0)/l0
+						ec = ef + eta*(es - ef)
+						self._applied_strain_force(t, n, q_c, acc_c, (i, j, ec, k, l0, phase, T))
+					else:
+						self._applied_strain_force(t, n, q, acc, (i, j, es, k, l0, phase, T))
+						self._applied_strain_force(t, n, q_c, acc_c, (i, j, es, k, l0, phase, T))
 				else:
 					self._applied_strain_force(t, n, q, acc, (i, j, es, k, l0, phase, T))
 
@@ -649,14 +656,18 @@ class Allosteric(Elastic):
 			if np.abs(et) > 0:
 				i, j, l0, phase = target['i'], target['j'], target['length'], target['phase']
 				if train:
-					l = np.sqrt((q[3*i]-q[3*j])**2+(q[3*i+1]-q[3*j+1])**2+(q[3*i+2]-q[3*j+2])**2)
-					ef = (l - l0)/l0
-					ec = ef + eta*(et - ef)
-					self._applied_strain_force(t, n, q_c, acc_c, (i, j, ec, k, l0, phase, T))
+					if symmetric:
+						self._applied_strain_force(t, n, q, acc, (i, j, et, k, l0, phase, T))
+						self._applied_strain_force(t, n, q_c, acc_c, (i, j, et, k, l0, phase, T))
+					else:
+						l = np.sqrt((q[3*i]-q[3*j])**2+(q[3*i+1]-q[3*j+1])**2+(q[3*i+2]-q[3*j+2])**2)
+						ef = (l - l0)/l0
+						ec = ef + eta*(et - ef)
+						self._applied_strain_force(t, n, q_c, acc_c, (i, j, ec, k, l0, phase, T))
 				else:
 					self._applied_strain_force(t, n, q, acc, (i, j, et, k, l0, phase, T))
 
-	def _applied_jacobian(self, t, n, q, q_c, dfdx, dfdx_c, dfdx_f, T, applied_args, train, eta):
+	def _applied_jacobian(self, t, n, q, q_c, dfdx, dfdx_c, dfdx_f, T, applied_args, train, eta, symmetric):
 		'''Compute the jacobian of the applied force at the source(s) and target(s).
 		
 		Parameters
@@ -666,7 +677,9 @@ class Allosteric(Elastic):
 		n : int
 			The number of nodes.
 		q : ndarray
-			The position coordinates of the nodes.
+			The position coordinates of the nodes in the free strained state.
+		q_c : ndarray
+			The position coordinates of the nodes in the clamped strained state.
 		dfdx : ndarray
 			Memory for storing the derivative of the applied forces in the free state with respect
 			to free state positions.
@@ -685,6 +698,8 @@ class Allosteric(Elastic):
 			The type of training to perform.
 		eta : float
 			Nudge factor.
+		symmetric : bool
+			Whether to train symmetrically with source and target roles reversed.
 		'''
 
 		ess, ets, k = applied_args
@@ -696,8 +711,15 @@ class Allosteric(Elastic):
 			if np.abs(es) > 0:
 				i, j, l0, phase = source['i'], source['j'], source['length'], source['phase']
 				if train:
-					self._applied_strain_jacobian(t, n, q, dfdx, (i, j, es, k, l0, phase, T))
-					self._applied_strain_jacobian(t, n, q_c, dfdx_c, (i, j, es, k, l0, phase, T))
+					if symmetric:
+						l = np.sqrt((q[3*i]-q[3*j])**2+(q[3*i+1]-q[3*j+1])**2+(q[3*i+2]-q[3*j+2])**2)
+						ef = (l - l0)/l0
+						ec = ef + eta*(es - ef)
+						self._applied_strain_jacobian(t, n, q_c, dfdx_c, (i, j, ec, k, l0, phase, T))
+						self._nudge_coupling_jacobian(t, n, q, q_c, dfdx_f, (i, j, ec, k, l0, phase, T), eta)
+					else:
+						self._applied_strain_jacobian(t, n, q, dfdx, (i, j, es, k, l0, phase, T))
+						self._applied_strain_jacobian(t, n, q_c, dfdx_c, (i, j, es, k, l0, phase, T))
 				else:
 					self._applied_strain_jacobian(t, n, q, dfdx, (i, j, es, k, l0, phase, T))
 
@@ -705,11 +727,15 @@ class Allosteric(Elastic):
 			if np.abs(et) > 0:
 				i, j, l0, phase = target['i'], target['j'], target['length'], target['phase']
 				if train:
-					l = np.sqrt((q[3*i]-q[3*j])**2+(q[3*i+1]-q[3*j+1])**2+(q[3*i+2]-q[3*j+2])**2)
-					ef = (l - l0)/l0
-					ec = ef + eta*(et - ef)
-					self._applied_strain_jacobian(t, n, q_c, dfdx_c, (i, j, ec, k, l0, phase, T))
-					self._nudge_coupling_jacobian(t, n, q, q_c, dfdx_f, (i, j, ec, k, l0, phase, T), eta)
+					if symmetric:
+						self._applied_strain_jacobian(t, n, q, dfdx, (i, j, et, k, l0, phase, T))
+						self._applied_strain_jacobian(t, n, q_c, dfdx_c, (i, j, et, k, l0, phase, T))
+					else:
+						l = np.sqrt((q[3*i]-q[3*j])**2+(q[3*i+1]-q[3*j+1])**2+(q[3*i+2]-q[3*j+2])**2)
+						ef = (l - l0)/l0
+						ec = ef + eta*(et - ef)
+						self._applied_strain_jacobian(t, n, q_c, dfdx_c, (i, j, ec, k, l0, phase, T))
+						self._nudge_coupling_jacobian(t, n, q, q_c, dfdx_f, (i, j, ec, k, l0, phase, T), eta)
 				else:
 					self._applied_strain_jacobian(t, n, q, dfdx, (i, j, et, k, l0, phase, T))
 
@@ -1673,7 +1699,7 @@ class Allosteric(Elastic):
 			fig.savefig(filename, bbox_inches='tight', dpi=300)
 		plt.show()
 
-	def mode_plot(self, v, scale, disks=True, figsize=(5,5), filename=None):
+	def mode_plot(self, v, scale, arrows=True, disks=False, figsize=(5,5), filename=None):
 		'''Plot a deformation mode (displacement) of the network.
 		
 		Parameters
@@ -1682,6 +1708,9 @@ class Allosteric(Elastic):
 			Unit displacement vector.
 		scale : float
 			Factor by which to scale the displacement values.
+		arrows : bool, optional
+			Whether to plot arrows at each node indicating the displacement direction,
+			with size proportional to displacement magnitude.
 		disks : bool, optional
 			Whether to plot disks at each node colored according to displacement
 			direction, with size proportional to displacement magnitude.
@@ -1700,19 +1729,61 @@ class Allosteric(Elastic):
 		eci = mc.LineCollection(e[:,:,:self.dim], colors=[0.6,0.6,0.6], linewidths=0.5, linestyle='dashed')
 		ax.add_collection(eci)
 
-		# add offset
-		self.pts[:,0][self.degree>0] += scale*v[::3]/fac
-		self.pts[:,1][self.degree>0] += scale*v[1::3]/fac
+		if arrows:
+			# color repeats every 2*pi
+			col = np.arctan2(v[1::3], v[::3])
+			norm = mpl.colors.Normalize(vmin=-np.pi, vmax=np.pi)
 
-		e = self._collect_edges()
-		ec = mc.LineCollection(e[:,:,:self.dim], colors='k', linewidths=0.5)
-		ax.add_collection(ec)
+			#ax.quiver(self.pts[:,0][self.degree>0], self.pts[:,1][self.degree>0],
+			#		  v[::3], v[1::3], col, angles='xy', scale=fac/scale, cmap=cyclic_cmap, norm=norm)
+
+			for source in self.sources:
+				s = self.plot_source(ax, source)
+			for target in self.targets:
+				t = self.plot_target(ax, target)
+
+			# interpolate displacement field
+			xmin, ymin, zmin = np.min(self.pts, axis=0)
+			xmax, ymax, zmax = np.max(self.pts, axis=0)
+			X, Y = np.meshgrid(np.linspace(xmin, xmax, 100), np.linspace(ymin, ymax, 100))
+			#Zx = griddata(self.pts[:,:self.dim][self.degree>0], v[::3], (X,Y), method='linear')
+			#Zy = griddata(self.pts[:,:self.dim][self.degree>0], v[1::3], (X,Y), method='linear')
+			ix = CloughTocher2DInterpolator(self.pts[:,:self.dim][self.degree>0], v[::3])
+			iy = CloughTocher2DInterpolator(self.pts[:,:self.dim][self.degree>0], v[1::3])
+			Zx = ix(X, Y)
+			Zy = iy(X, Y)
+			Z = np.arctan2(Zy, Zx)
+			#cf = plt.pcolormesh(X, Y, Z, cmap=cyclic_cmap, norm=norm, shading='gouraud', zorder=0, alpha=0.2)
+
+			strm = ax.streamplot(X, Y, Zx, Zy, color='k', linewidth=1, density=3)
+			#strm = ax.streamplot(X, Y, Zx, Zy, color=Z, cmap=cyclic_cmap, norm=norm, linewidth=1, density=2)
+			'''
+			Zgx = np.gradient(Zx)
+			Zgy = np.gradient(Zy)
+			# project onto vector orthogonal to Zx and Zy at every point
+			Zgpx = (Zgx[0] * Zy - Zgx[1] * Zx)/np.sqrt(Zx**2 + Zy**2)
+			Zgpy = (Zgy[0] * Zy - Zgy[1] * Zx)/np.sqrt(Zx**2 + Zy**2)
+			Zgp = np.sqrt(Zgpx**2 + Zgpy**2)
+			cf = plt.pcolormesh(X, Y, Zgp, cmap=plt.cm.Blues, norm=mpl.colors.Normalize(vmin=0, vmax=fac/scale/self.n),
+				shading='gouraud', zorder=0, alpha=0.2)
+			'''
+
+		else:
+			# add offset
+			self.pts[:,0][self.degree>0] += scale*v[::3]/fac
+			self.pts[:,1][self.degree>0] += scale*v[1::3]/fac
+
+			e = self._collect_edges()
+			ec = mc.LineCollection(e[:,:,:self.dim], colors='k', linewidths=0.5)
+			ax.add_collection(ec)
 
 		if disks:
+			# here color repeats every pi
 			col = np.arctan2(v[1::3], v[::3])
 			col[col<0] += np.pi
 			norm = mpl.colors.Normalize(vmin=0, vmax=np.pi)
 			r = scale*np.sqrt(v[::3]**2+v[1::3]**2)/fac
+
 			dc = mc.EllipseCollection(r, r, np.zeros_like(r), offsets=self.pts[self.degree>0,:self.dim],
 										  transOffset=ax.transData, units='x',
 										  edgecolor='k', facecolor=cyclic_cmap(norm(col)), linewidths=0.5, zorder=100)
@@ -1721,7 +1792,7 @@ class Allosteric(Elastic):
 		# reset
 		self.reset_init()
 
-		lim = (1+1./np.sqrt(self.n))*np.max(np.abs(self.pts))
+		lim = (1+2./np.sqrt(self.n))*np.max(np.abs(self.pts))
 		ax.set_xlim(-lim,lim)
 		ax.set_ylim(-lim,lim)
 		ax.axis('off')
@@ -1790,6 +1861,131 @@ class Allosteric(Elastic):
 		if filename:
 			fig.savefig(filename, bbox_inches='tight')
 		plt.show()
+
+	def strain_map(self, applied_args, figsize=(5,5), filename=None):
+		'''Plot a map of the strain in the network due to input strains at the source or target.
+
+		Parameters
+		----------
+		applied_args : tuple
+			Simulation arguments: the source strain(s), target strain(s), and pinning stiffness.
+		figsize : tuple, optional
+			The figure size.
+		filename : str, optional
+			The name of the file for saving the plot.
+
+		'''
+
+		# compute the strain vector
+		self.reset_init()
+
+		ess, ets, ka = applied_args
+
+		if not hasattr(ess, '__len__'): ess = len(self.sources)*[ess]
+		if not hasattr(ets, '__len__'): ets = len(self.targets)*[ets]
+
+		ne = self.ne
+		n = self.n
+
+		ls = np.zeros(ne)
+		ls0 = np.zeros(ne)
+		for e,edge in enumerate(self.graph.edges(data=True)):
+			i, j = edge[0], edge[1]
+			ls[e] = edge[2]['length']
+			ls0[e] = self._distance(self.pts[i],self.pts[j])
+		dl = ls-ls0
+
+		# augment with source and target edges
+		ns = len(self.sources)
+		nt = len(self.targets)
+		ntot = ne+ns+nt
+
+		L = np.zeros((ntot,ntot))
+		K = np.zeros((ntot,ntot))
+		R = np.zeros((ntot,3*n))
+		H = np.zeros((3*n,3*n))
+
+		q = self.pts.ravel()
+		edge_i, edge_j, edge_k, edge_l, edge_t = self._edge_lists()
+		network = (edge_i, edge_j, edge_k, edge_l, edge_t)
+
+		for e, edge in enumerate(self.graph.edges(data=True)):
+			i, j = edge[0], edge[1]
+			k, l = edge[2]['stiffness'], edge[2]['length']
+			self._rigidity_pair(q, R, e, i, j)
+			K[e,e] = k
+			L[e,e] = l
+		e = ne
+
+		self._elastic_jacobian(0, n, q, edge_k, edge_l, H, network)
+
+		for es, pair in zip(ess, self.sources):
+			i, j, l, p = pair['i'], pair['j'], pair['length'], pair['phase']
+			self._rigidity_pair(q, R, e, i, j)
+			L[e,e] = l
+			if np.abs(es) > 0:
+				self._applied_strain_jacobian(0, n, q, H, (i, j, 0, ka, l, p, 0))
+				K[e,e] = ka
+			else:
+				K[e,e] = 0.
+			e += 1
+
+		for et, pair in zip(ets, self.targets):
+			i, j, l, p = pair['i'], pair['j'], pair['length'], pair['phase']
+			self._rigidity_pair(q, R, e, i, j)
+			L[e,e] = l
+			if np.abs(et) > 0:
+				self._applied_strain_jacobian(0, n, q, H, (i, j, 0, ka, l, p, 0))
+				K[e,e] = ka
+			else:
+				K[e,e] = 0.
+			e += 1
+
+		delta = np.zeros(ntot)
+		delta[:ne] = np.copy(dl)
+
+		H *= -1
+		W = np.linalg.inv(L)@R@np.linalg.pinv(H, hermitian=True)@R.T@K@L
+		b = np.dot(np.linalg.inv(L)@R@np.linalg.pinv(H, hermitian=True)@R.T@K, delta.reshape(-1,1)).ravel()
+
+		ein = np.zeros(ntot)
+		ein[ne:ne+ns] = np.array(ess)
+		ein[ne+ns:] = np.array(ets)
+
+		eout = W @ ein.reshape(-1,1) + b.reshape(-1,1)
+		eout = eout[:ne] # consider only the bonds
+		print(np.min(np.abs(eout)),np.max(np.abs(eout)))
+
+		# plot
+		fig, ax = plt.subplots(1,1,figsize=figsize)
+		e = self._collect_edges()
+		eci = mc.LineCollection(e[:,:,:self.dim], colors=[0.6,0.6,0.6], linewidths=0.5, linestyle='dashed')
+		ax.add_collection(eci)
+
+		for source in self.sources:
+			s = self.plot_source(ax, source)
+		for target in self.targets:
+			t = self.plot_target(ax, target)
+
+		# interpolate the strain field
+		em = np.mean(e, axis=1)
+
+		xmin, ymin, zmin = np.min(self.pts, axis=0)
+		xmax, ymax, zmax = np.max(self.pts, axis=0)
+		X, Y = np.meshgrid(np.linspace(xmin, xmax, 100), np.linspace(ymin, ymax, 100))
+		Z = griddata(em[:,:self.dim], eout.ravel(), (X,Y), method='linear')
+		cf = plt.pcolormesh(X, Y, Z, cmap=plt.cm.Blues, shading='gouraud', zorder=0, alpha=0.2)
+
+		lim = (1+2./np.sqrt(self.n))*np.max(np.abs(self.pts))
+		ax.set_xlim(-lim,lim)
+		ax.set_ylim(-lim,lim)
+		ax.axis('off')
+
+		fig.tight_layout()
+		if filename:
+			fig.savefig(filename, bbox_inches='tight')
+		plt.show()
+
 
 	def distribution_plot(self, kind='stiffness', vmin=0, vmax=2, nbins=25, figsize=(2.5,2), filename=None):
 		'''Make a distribution plot of either bond stiffnesses or rest lengths.
