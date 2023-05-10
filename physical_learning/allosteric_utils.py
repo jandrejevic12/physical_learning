@@ -163,7 +163,7 @@ class Allosteric(Elastic):
 						self.targets += [{'i':ti, 'j':tj, 'length':tl, 'phase':sp}]
 		return graph, dim
 
-	def add_sources(self, ns=1, auto=True, boundary=False, seed=12):
+	def add_sources(self, ns=1, auto=True, boundary=False, seed=12, plot=True):
 		'''Add pairs of source nodes to the network.
 
 		If any two connected nodes are selected, the edge between them is removed.
@@ -180,6 +180,9 @@ class Allosteric(Elastic):
 			is False.
 		seed : int, optional
 			The random seed to use if selecting sources automatically.
+		plot : bool, optional
+			Whether to plot the network. Default is True. Will be set to True
+			automatically for manual node selection.
 		'''
 
 		if self.dim == 3 and not auto:
@@ -188,13 +191,13 @@ class Allosteric(Elastic):
 
 		if auto:
 			if boundary:
-				success = self._add_pairs_boundary(ns, kind='source', seed=seed)
+				success = self._add_pairs_boundary(ns, kind='source', seed=seed, plot=plot)
 			else:
-				success = self._add_pairs_auto(ns, kind='source', seed=seed)
+				success = self._add_pairs_auto(ns, kind='source', seed=seed, plot=plot)
 		else:
 			self._add_pairs_manual(ns, kind='source')
 
-	def add_targets(self, nt=1, auto=True, boundary=False, seed=12):
+	def add_targets(self, nt=1, auto=True, boundary=False, seed=12, plot=True):
 		'''Add pairs of target nodes to the network.
 
 		If any two connected nodes are selected, the edge between them is removed.
@@ -211,6 +214,9 @@ class Allosteric(Elastic):
 			is False.
 		seed : int, optional
 			The random seed to use if selecting targets automatically.
+		plot : bool, optional
+			Whether to plot the network. Default is True. Will be set to True
+			automatically for manual node selection.
 		'''
 
 		if self.dim == 3 and not auto:
@@ -219,13 +225,13 @@ class Allosteric(Elastic):
 
 		if auto:
 			if boundary:
-				success = self._add_pairs_boundary(nt, kind='target', seed=seed)
+				success = self._add_pairs_boundary(nt, kind='target', seed=seed, plot=plot)
 			else:
-				success = self._add_pairs_auto(nt, kind='target', seed=seed)
+				success = self._add_pairs_auto(nt, kind='target', seed=seed, plot=plot)
 		else:
 			self._add_pairs_manual(nt, kind='target')
 
-	def _add_pairs_auto(self, n, kind, seed):
+	def _add_pairs_auto(self, n, kind, seed, plot):
 		'''Select node pairs automatically and append to source or target lists.
 		
 		Parameters
@@ -236,6 +242,8 @@ class Allosteric(Elastic):
 			Whether to add the selected pairs to source or target nodes.
 		seed : int
 			The random seed to use.
+		plot : bool
+			Whether to plot the resulting network.
 		'''
 
 		min_degree = self.dim+2
@@ -257,10 +265,10 @@ class Allosteric(Elastic):
 			if edge[0] in excluded_nodes or edge[1] in excluded_nodes: edges.pop(e)
 
 		success = self._add_pairs_by_distance(n, edges, kind, seed)
-		self.plot()
+		if plot: self.plot()
 		return success
 
-	def _add_pairs_boundary(self, n, kind, seed):
+	def _add_pairs_boundary(self, n, kind, seed, plot):
 		'''Select node pairs automatically and append to source or target lists.
 
 		Pairs will be chosen to lie on the boundary of the network. If a suitable choice cannot
@@ -274,6 +282,8 @@ class Allosteric(Elastic):
 			Whether to add the selected pairs to source or target nodes.
 		seed : int
 			The random seed to use.
+		plot : bool
+			Whether to plot the resulting network.
 
 		Returns
 		-------
@@ -283,7 +293,7 @@ class Allosteric(Elastic):
 
 		vor, tri, edges = self._find_boundary_pairs()
 		success = self._add_pairs_by_distance(n, edges, kind, seed)
-		self.plot()
+		if plot: self.plot()
 		return success
 
 	def _find_boundary_pairs(self):
