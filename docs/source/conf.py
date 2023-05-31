@@ -53,9 +53,9 @@ sys.path.insert(0, os.path.abspath('./../..'))
 def setup(app):
 	import mock
 
-	MOCK_MODULES = ['numpy', 'scipy', 'scipy.integrate', 'scipy.spatial', 'scipy.interpolate', 'scipy.linalg', 'cmocean',
-			'networkx', 'numba', 'pandas', 'poisson_disc', 'skimage', 'sklearn', 'sklearn.cluster', 'sklearn.metrics', 'tqdm',
-			'matplotlib', 'matplotlib.pyplot', 'matplotlib.collections', 'matplotlib.animation', 'matplotlib.ticker',
+	MOCK_MODULES = ['numpy', 'scipy', 'scipy.integrate', 'scipy.spatial', 'scipy.interpolate', 'scipy.linalg', 'scipy.sparse',
+		    'cmocean', 'networkx', 'numba', 'pandas', 'poisson_disc', 'skimage', 'sklearn', 'sklearn.cluster', 'sklearn.metrics',
+			'matplotlib', 'matplotlib.pyplot', 'matplotlib.collections', 'matplotlib.animation', 'matplotlib.ticker', 'tqdm',
 			'vapory', 'plot_imports']
 
 	for mod_name in MOCK_MODULES:

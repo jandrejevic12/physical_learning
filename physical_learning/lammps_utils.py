@@ -134,7 +134,7 @@ def read_dim(filename):
 			line = f.readline()
 	return int(line.strip().split()[1])
 
-def setup_run(allo, odir, prefix, lmp_path, duration, frames, applied_args, train=0, method=None, eta=1., alpha=1e-3, vmin=1e-3, temp=0, dt=0.005, hours=24):
+def setup_run(allo, odir, prefix, lmp_path, duration, frames, applied_args, train=0, method=None, eta=1., alpha=1e-3, vmin=1e-3, temp=0, symmetric=False, dt=0.005, hours=24):
 	'''Set up a complete LAMMPS simulation in a directory.
 	   
 	Parameters
@@ -165,6 +165,8 @@ def setup_run(allo, odir, prefix, lmp_path, duration, frames, applied_args, trai
 		The smallest allowed value for each learning degree of freedom.
 	temp : float, optional
 		The temperature setting, in LJ units. If zero (default), an athermal simulation is performed.
+	symmetric : bool, optional
+		Whether to introduce a symmetric state for training with a different set of boundary conditions. Default is False.
 	dt : float, optional
 		Integration step size.
 	hours : int, optional
@@ -184,10 +186,11 @@ def setup_run(allo, odir, prefix, lmp_path, duration, frames, applied_args, trai
 
 	if train:
 		allo.write_lammps_data_learning(odir+datafile, 'Allosteric network', applied_args,
-										train=train, method=method, eta=eta, alpha=alpha, vmin=vmin, dt=dt)
+										train=train, method=method, eta=eta, alpha=alpha, vmin=vmin,
+										symmetric=symmetric, dt=dt)
 	else:
 		allo.write_lammps_data(odir+datafile, 'Allosteric network', applied_args)
-	allo.write_lammps_input(odir+infile, datafile, dumpfile, duration, frames, temp=temp, method=method, dt=dt)
+	allo.write_lammps_input(odir+infile, datafile, dumpfile, duration, frames, temp=temp, method=method, symmetric=symmetric, dt=dt)
 	allo.save(odir+'allo.txt') # do this last, because it resets init!!
 
 	cmd = lmp_path+' -i '+infile+' -log '+logfile
@@ -236,16 +239,34 @@ def load_run(odir):
 	data, cols = read_log(logfile)
 	allo.t_eval = data[:,cols.index('Time')]
 	traj, vtraj = read_dump(dumpfile)
-	if traj.shape[1] == allo.n:
+	if traj.shape[1] == allo.n: # free state only
 		allo.traj = np.copy(traj)
-		allo.traj_c = np.copy(traj)
 		allo.vtraj = np.copy(vtraj)
+		allo.traj_c = np.copy(traj)
 		allo.vtraj_c = np.copy(vtraj)
-	else:
+		allo.traj_s = np.copy(traj)
+		allo.vtraj_s = np.copy(vtraj)
+		allo.traj_sc = np.copy(traj)
+		allo.vtraj_sc = np.copy(vtraj)
+	elif traj.shape[1] == 2*allo.n: # free and clamped states
 		allo.traj = np.copy(traj[:,1::2,:])
-		allo.traj_c = np.copy(traj[:,::2,:])
 		allo.vtraj = np.copy(vtraj[:,1::2,:])
+		allo.traj_c = np.copy(traj[:,::2,:])
 		allo.vtraj_c = np.copy(vtraj[:,::2,:])
+		allo.traj_s = np.copy(traj[:,1::2,:])
+		allo.vtraj_s = np.copy(vtraj[:,1::2,:])
+		allo.traj_sc = np.copy(traj[:,::2,:])
+		allo.vtraj_sc = np.copy(vtraj[:,::2,:])
+	else: # symmetric free and clamped states
+		allo.traj = np.copy(traj[:,1::4,:])
+		allo.vtraj = np.copy(vtraj[:,1::4,:])
+		allo.traj_c = np.copy(traj[:,::4,:])
+		allo.vtraj_c = np.copy(vtraj[:,::4,:])
+		allo.traj_s = np.copy(traj[:,3::4,:])
+		allo.vtraj_s = np.copy(vtraj[:,3::4,:])
+		allo.traj_sc = np.copy(traj[:,2::4,:])
+		allo.vtraj_sc = np.copy(vtraj[:,2::4,:])
+
 	return allo, data, cols
 
 def get_clusters(data, n, seed=12):

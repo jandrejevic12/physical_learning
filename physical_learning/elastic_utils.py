@@ -260,8 +260,9 @@ class Elastic(object):
 		----------
 		duration : float
 			The final integration time.
-		frames : int
-			The number of output frames to produce (excluding initial frame).
+		frames : int or ndarray
+			If integer, the number of evenly-spaced output frames to produce (excluding initial frame).
+			If array, the time points at which to output snapshots.
 		T : float
 			Period for oscillatory force. If T = 0, nodes with an applied force are held stationary.
 		applied_args : tuple
@@ -336,7 +337,11 @@ class Elastic(object):
 
 		ti = 0; tf = duration
 		t_span = [ti, tf]
-		self.t_eval = np.linspace(ti, tf, frames+1)
+		if not hasattr(frames, '__len__'):
+			self.t_eval = np.linspace(ti, tf, frames+1)
+		else:
+			self.t_eval = np.copy(frames)
+			frames = len(self.t_eval)-1
 		self.tp = ti
 
 		if pbar:
@@ -2095,18 +2100,18 @@ class Elastic(object):
 
 	def _povray_spheres(self, nodes):
 		spheres = [0 for _ in range(len(nodes))]
-		c = 'rgb<0.3,0.4,0.5>'
-		r = 2*self.params['radius']
+		c = 'rgb<0.35,0.7,0.7>'
+		r = 5*self.params['radius']
 		for i,node in enumerate(nodes):
 			spheres[i] = Sphere(self.pts[node], r,
 						 Texture(Pigment('color',c),
 						 Finish('ambient',0.24,'diffuse',0.88,
-						 'specular',0.1,'phong',0.2,'phong_size',5)))
+						 'specular',0.3,'phong',0.2,'phong_size',5)))
 		return spheres
 
 	def _povray_edges(self, pairs):
 		edges = [0 for _ in range(len(pairs))]
-		c = 'rgb<0.3,0.4,0.5>'
+		c = 'rgb<0.1,0.3,0.3>'
 		r = self.params['radius']
 		for i,pair in enumerate(pairs):
 			edges[i] = Cylinder(self.pts[pair[0]], self.pts[pair[1]], r,

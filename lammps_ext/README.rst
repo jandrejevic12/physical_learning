@@ -7,7 +7,7 @@ Extending LAMMPS for physical learning
    
    $ git clone -b release https://github.com/lammps/lammps.git lammps
 
-2. Add the provided :code:`bond_harmonic_learning.h` and :code:`bond_harmonic_learning.cpp` to the :code:`lammps/src/MOLECULE/` directory of the LAMMPS code. The :code:`lammps/src/Makefile.list` should also be modified to include these files, as shown in the example :code:`Makefile.list` provided.
+2. Add the provided :code:`bond_harmonic_learning.h/.cpp` and :code:`bond_harmonic_learning_symmetric.h/.cpp` to the :code:`lammps/src/MOLECULE/` directory of the LAMMPS code. Modify :code:`lammps/src/Makefile.list` to include these files in the :code:`SRC` (for .cpp files) and :code:`INC` (for .h files) fields, as shown in the example :code:`Makefile.list` provided.
 
 3. Make a build folder in the `lammps` directory:
 

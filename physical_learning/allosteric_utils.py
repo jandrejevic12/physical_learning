@@ -10,6 +10,7 @@ import matplotlib.animation as animation
 
 from scipy.spatial import Voronoi, voronoi_plot_2d, Delaunay
 from scipy.interpolate import griddata, CloughTocher2DInterpolator
+from skimage import filters
 
 import networkx as nx
 from vapory import *
@@ -1053,7 +1054,7 @@ class Allosteric(Elastic):
 			Spheres to plot.
 		'''
 
-		r = 4*self.params['radius']
+		r = 6*self.params['radius']
 		c = 'rgb<0.0,0.4,0.8>'
 
 		return [Sphere(self.pts[source['i']], r,
@@ -1117,7 +1118,7 @@ class Allosteric(Elastic):
 			Spheres to plot.
 		'''
 
-		r = 4*self.params['radius']
+		r = 6*self.params['radius']
 		c = 'rgb<0.9,0.1,0.1>'
 
 		return [Sphere(self.pts[target['i']], r,
@@ -1130,24 +1131,26 @@ class Allosteric(Elastic):
 				Finish('ambient',0.24,'diffuse',0.88,
 				'specular',0.1,'phong',0.2,'phong_size',5)))]
 
-	def plot(self, spine=False, contour=False, figsize=(5,5), filename=None):
+	def plot(self, spine=False, contour=False, outline=False, figsize=(5,5), filename=None):
 		'''Plot the network.
 		
 		Parameters
 		----------
 		spine : bool, optional
 			Whether to plot only the spine of the network connecting the source
-			and target nodes. Only used for 3D plotting. Default is false.
+			and target nodes. Only used for 3D plotting. Default is False.
 		contour : bool, optional
 			Whether to plot the contour of the whole network. Helps with decluttering
-			complicated networks when used with spine.
+			complicated networks when used with spine. Default is False.
+		outline : bool, optional
+			Whether to outline nodes and edges with a black border. Default is False.
 		figsize : tuple, optional
 			The figure size.
 		filename : str, optional
 			The name of the file for saving the plot.
 		'''
 		if self.dim == 2: self._plot_2d(figsize, filename)
-		else: self._plot_3d(spine, contour, figsize, filename)
+		else: self._plot_3d(spine, contour, outline, figsize, filename)
 
 	def _plot_2d(self, figsize=(5,5), filename=None):
 		'''Plot a 2D network.'''
@@ -1165,7 +1168,7 @@ class Allosteric(Elastic):
 			fig.savefig(filename, bbox_inches='tight')
 		plt.show()
 
-	def _plot_3d(self, spine=False, contour=False, figsize=(5,5), filename=None):
+	def _plot_3d(self, spine=False, contour=False, outline=False, figsize=(5,5), filename=None):
 		'''Plot a 3D network.'''
 
 		fig, ax = plt.subplots(1,1,figsize=figsize)
@@ -1186,16 +1189,36 @@ class Allosteric(Elastic):
 			hull = []
 
 		objects = [bg]+lights+spheres+edges+hull
+		sites = []
 		for source in self.sources:
-			objects += self.plot_source(ax, source)
+			sites += self.plot_source(ax, source)
 		for target in self.targets:
-			objects += self.plot_target(ax, target)
+			sites += self.plot_target(ax, target)
+		objects += sites
 
 		scene = Scene(camera,
 					  objects = objects,
 					  included = ["colors.inc", "textures.inc"])
-
 		mat = scene.render(width=width, height=height, antialiasing=0.01)
+
+		if outline:
+			focus = Scene(camera,
+						  objects = [bg]+lights+sites,
+						  included = ["colors.inc", "textures.inc"])
+
+			mat_f = focus.render(width=width, height=height, antialiasing=0.01)
+			no_shadow = scene.render(width=width, height=height, antialiasing=0.0001, quality=1)
+			no_shadow_f = focus.render(width=width, height=height, antialiasing=0.0001, quality=1)
+
+			filt = np.array([filters.roberts(1.0*no_shadow[:,:,i]) for i in [0,1,2]])
+			out = np.dstack(3*[255*(filt.max(axis=0)==0)])
+			out = np.maximum(out, 120)
+
+			filt = np.array([filters.roberts(1.0*no_shadow_f[:,:,i]) for i in [0,1,2]])
+			out_f = np.dstack(3*[255*(filt.max(axis=0)==0)])
+			out_f = np.maximum(out_f, 72)
+			mat = np.minimum(np.minimum((0.75*mat+0.25*mat_f).astype(int), out), out_f)
+
 		ax.imshow(mat)
 		ax.axis('off')
 		fig.tight_layout()
@@ -1730,6 +1753,11 @@ class Allosteric(Elastic):
 			The name of the file for saving the plot.
 		'''
 
+		if self.dim == 2: self._mode_plot_2d(v, scale, arrows, disks, figsize, filename)
+		else: self._mode_plot_3d(v, scale, arrows, disks, figsize, filename)
+
+	def _mode_plot_2d(self, v, scale, arrows=True, disks=False, figsize=(5,5), filename=None):
+
 		# Plot the network with source and target edges and nodes.
 		self.reset_init()
 		fig, ax = plt.subplots(1,1,figsize=figsize)
@@ -1811,6 +1839,111 @@ class Allosteric(Elastic):
 		if filename:
 			fig.savefig(filename, bbox_inches='tight')
 		plt.show()
+
+	def _mode_plot_3d(self, v, scale, arrows=True, disks=False, figsize=(5,5), filename=None):
+
+		fig, ax = plt.subplots(1,1,figsize=figsize)
+		width = int(100*figsize[0]); height = int(100*figsize[1])
+		fac = 4
+
+		bg, lights, camera = self._povray_setup()
+		spheres, edges = self.plot_network(ax)
+		cones = []
+
+		if disks:
+			col = np.arctan2(v[2::3], v[::3])
+			col[col<0] += np.pi
+			norm = mpl.colors.Normalize(vmin=0, vmax=np.pi)
+			r = scale*np.sqrt(v[::3]**2+v[1::3]**2+v[2::3]**2)/fac
+			for i in range(self.n):
+				c = cyclic_cmap(norm(col[i]))
+				spheres[i] = Sphere(self.pts[i], r[i],
+							 Texture(Pigment('color','rgb<{:.2f},{:.2f},{:.2f}>'.format(c[0],c[1],c[2])),
+							 Finish('ambient',0.24,'diffuse',0.88,
+							 'specular',0.3,'phong',0.2,'phong_size',5)))
+
+		if arrows:
+			cmap = continuous_cmap([np.array([0.8,0.8,0.8]), pal['yellow'], pal['green']], [0,0.3,1])
+			norm = mpl.colors.Normalize(vmin=0, vmax=np.max(np.sqrt(v[::3]**2+v[1::3]**2+v[2::3]**2)))
+			cones = [0 for _ in range(self.n)]
+			sources = [source['i'] for source in self.sources] + \
+					  [source['j'] for source in self.sources]
+			targets = [target['i'] for target in self.targets] + \
+					  [target['j'] for target in self.targets]
+			r = scale*np.sqrt(v[::3]**2+v[1::3]**2+v[2::3]**2)
+			h = 4*self.params['radius']
+			for i in range(self.n):
+				vh = v[3*i:3*(i+1)]/np.linalg.norm(v[3*i:3*(i+1)])
+				#c = 'rgb<0.35,0.7,0.7>'
+				col = cmap(norm(np.sqrt(np.sum(np.square(v[3*i:3*(i+1)])))))
+				c = 'rgb<{:.2f},{:.2f},{:.2f}>'.format(col[0],col[1],col[2])
+				if i in sources:
+					c = 'rgb<0.0,0.4,0.8>'
+				elif i in targets:
+					c = 'rgb<0.9,0.1,0.1>'
+				if r[i] < h:
+					e2 = self.pts[i]
+					ec = self.pts[i] + h*vh
+					cones[i] = Cone(e2, 2*self.params['radius'], ec, 0,
+									  Texture(Pigment('color',c),
+									  Finish('ambient',0.24,'diffuse',0.88,
+									  'specular',0.3,'phong',0.2,'phong_size',5)))
+				else:
+					e1 = self.pts[i]
+					e2 = self.pts[i] + (r[i]-h)*vh
+					ec = self.pts[i] + r[i]*vh
+					cones[i] = Union(Cone(e2, 2*self.params['radius'], ec, 0),
+									   Cylinder(e1, e2, self.params['radius']),
+									   Texture(Pigment('color',c),
+									   Finish('ambient',0.24,'diffuse',0.88,
+									   'specular',0.3,'phong',0.2,'phong_size',5)))
+
+		objects = [bg]+lights+spheres+edges+cones
+		focus_objects = [bg]+lights
+		if disks:
+			focus_objects += spheres
+		if arrows:
+			focus_objects += cones
+
+		if arrows:
+			sites = []
+			for source in self.sources:
+				sites += self.plot_source(ax, source)
+			for target in self.targets:
+				sites += self.plot_target(ax, target)
+			objects += sites
+
+		scene = Scene(camera,
+					  objects = objects,
+					  included = ["colors.inc", "textures.inc"])
+
+		focus = Scene(camera,
+					  objects = focus_objects,
+					  included = ["colors.inc", "textures.inc"])
+
+		mat = scene.render(width=width, height=height, antialiasing=0.01)
+		mat_f = focus.render(width=width, height=height, antialiasing=0.01)
+		no_shadow = scene.render(width=width, height=height, antialiasing=0.0001, quality=1)
+		no_shadow_f = focus.render(width=width, height=height, antialiasing=0.0001, quality=1)
+
+		filt = np.array([filters.roberts(1.0*no_shadow[:,:,i]) for i in [0,1,2]])
+		out = np.dstack(3*[255*(filt.max(axis=0)==0)])
+		out = np.maximum(out, 120)
+
+		filt = np.array([filters.roberts(1.0*no_shadow_f[:,:,i]) for i in [0,1,2]])
+		out_f = np.dstack(3*[255*(filt.max(axis=0)==0)])
+		out_f = np.maximum(out_f, 72)
+		#mat = np.minimum(np.minimum((0.5*mat+0.5*mat_f).astype(int), outline), outline_f)
+		mat = np.minimum((0.35*mat+0.65*mat_f).astype(int), out_f)
+
+		ax.imshow(mat)
+		ax.axis('off')
+		fig.tight_layout()
+
+		if filename:
+			fig.savefig(filename, bbox_inches='tight')
+		plt.show()
+
 
 	def mode_tile(self, vs, scale, filename=None):
 		'''Plot a collection of deformation modes (displacements) of the network.
@@ -2134,7 +2267,7 @@ class Allosteric(Elastic):
 					f.write('{:d} {:d} {:d} {:d}\n'.format(e+1,e+1,target['i']+1,target['j']+1))
 					e += 1
 
-	def write_lammps_data_learning(self, filename, title, applied_args, train=2, method='learning', eta=1e-1, alpha=1e-3, vmin=1e-3, dt=0.005):
+	def write_lammps_data_learning(self, filename, title, applied_args, train=2, method='learning', eta=1e-1, alpha=1e-3, vmin=1e-3, symmetric=False, dt=0.005):
 		'''Write the datafile of atoms and bonds for a LAMMPS simulation with custom coupled learning routine.
 		
 		Parameters
@@ -2155,6 +2288,8 @@ class Allosteric(Elastic):
 			The aging rate.
 		vmin : float, optional
 			The smallest allowed value for each learning degree of freedom.
+		symmetric : bool, optional
+			Whether to introduce a symmetric state for training with a different set of boundary conditions. Default is False.
 		dt : float, optional
 			Integration step size.
 		'''
@@ -2178,7 +2313,8 @@ class Allosteric(Elastic):
 			f.write('{:s}\n\n'.format(title))
 
 			nb = self.ne + ns + nt
-			f.write('{:d} atoms\n'.format(2*self.n))
+			na = (2+2*int(symmetric))
+			f.write('{:d} atoms\n'.format(na*self.n))
 			f.write('{:d} bonds\n'.format(nb))
 			f.write('0 angles\n')
 			f.write('0 dihedrals\n')
@@ -2202,8 +2338,12 @@ class Allosteric(Elastic):
 
 			for es, source in zip(ess, self.sources):
 				if np.abs(es) > 0:
-					rs = source['length']*(1 + source['phase']*es)
-					f.write('{:d} {:.15g} {:.15g} {:.15g} {:.15g} {:.15g} {:.15g} {:d} {:d} {:d} {:d}\n'.format(e+1,0.5*ka,rs,0,eta,alpha*dt,0.5*vmin,0,0,1,0))
+					if symmetric:
+						rs = source['length']
+						f.write('{:d} {:.15g} {:.15g} {:.15g} {:.15g} {:.15g} {:.15g} {:d} {:d} {:d} {:d}\n'.format(e+1,0.5*ka,rs,es,eta,alpha*dt,0.5*vmin,0,0,source['phase'],2))
+					else:
+						rs = source['length']*(1 + source['phase']*es)
+						f.write('{:d} {:.15g} {:.15g} {:.15g} {:.15g} {:.15g} {:.15g} {:d} {:d} {:d} {:d}\n'.format(e+1,0.5*ka,rs,0,eta,alpha*dt,0.5*vmin,0,0,source['phase'],0))
 					e += 1
 			for et, target in zip(ets, self.targets):
 				if np.abs(et) > 0:
@@ -2214,30 +2354,36 @@ class Allosteric(Elastic):
 
 			f.write('Atoms\n\n')
 			for i in range(self.n):
-				f.write('{:d} 1 1 {:.15g} {:.15g} {:.15g}\n'.format(2*i+1,self.pts_c[i,0],self.pts_c[i,1],self.pts_c[i,2])) # clamped
-				f.write('{:d} 1 1 {:.15g} {:.15g} {:.15g}\n'.format(2*i+2,self.pts[i,0],self.pts[i,1],self.pts[i,2])) # free
+				f.write('{:d} 1 1 {:.15g} {:.15g} {:.15g}\n'.format(na*i+1,self.pts_c[i,0],self.pts_c[i,1],self.pts_c[i,2])) # clamped
+				f.write('{:d} 1 1 {:.15g} {:.15g} {:.15g}\n'.format(na*i+2,self.pts[i,0],self.pts[i,1],self.pts[i,2])) # free
+				if symmetric:
+					f.write('{:d} 1 1 {:.15g} {:.15g} {:.15g}\n'.format(na*i+3,self.pts_sc[i,0],self.pts_sc[i,1],self.pts_sc[i,2])) # symmetric clamped
+					f.write('{:d} 1 1 {:.15g} {:.15g} {:.15g}\n'.format(na*i+4,self.pts_s[i,0],self.pts_s[i,1],self.pts_s[i,2])) # symmetric free
 			f.write('\n')
 
 			f.write('Velocities\n\n')
 			for i in range(self.n):
-				f.write('{:d} {:.15g} {:.15g} {:.15g}\n'.format(2*i+1,self.vel_c[i,0],self.vel_c[i,1],self.vel_c[i,2])) # clamped
-				f.write('{:d} {:.15g} {:.15g} {:.15g}\n'.format(2*i+2,self.vel[i,0],self.vel[i,1],self.vel[i,2])) # free
+				f.write('{:d} {:.15g} {:.15g} {:.15g}\n'.format(na*i+1,self.vel_c[i,0],self.vel_c[i,1],self.vel_c[i,2])) # clamped
+				f.write('{:d} {:.15g} {:.15g} {:.15g}\n'.format(na*i+2,self.vel[i,0],self.vel[i,1],self.vel[i,2])) # free
+				if symmetric:
+					f.write('{:d} {:.15g} {:.15g} {:.15g}\n'.format(na*i+1,self.vel_sc[i,0],self.vel_sc[i,1],self.vel_sc[i,2])) # symmetric clamped
+					f.write('{:d} {:.15g} {:.15g} {:.15g}\n'.format(na*i+2,self.vel_s[i,0],self.vel_s[i,1],self.vel_s[i,2])) # symmetric free
 			f.write('\n')
 
 			f.write('Bonds\n\n')
 			for e,edge in enumerate(self.graph.edges()):
-				f.write('{:d} {:d} {:d} {:d}\n'.format(e+1,e+1,2*edge[0]+1,2*edge[1]+1))
+				f.write('{:d} {:d} {:d} {:d}\n'.format(e+1,e+1,na*edge[0]+1,na*edge[1]+1))
 			e = self.ne
 			for es, source in zip(ess, self.sources):
 				if np.abs(es) > 0:
-					f.write('{:d} {:d} {:d} {:d}\n'.format(e+1,e+1,2*source['i']+1,2*source['j']+1))
+					f.write('{:d} {:d} {:d} {:d}\n'.format(e+1,e+1,na*source['i']+1,na*source['j']+1))
 					e += 1
 			for et, target in zip(ets, self.targets):
 				if np.abs(et) > 0:
-					f.write('{:d} {:d} {:d} {:d}\n'.format(e+1,e+1,2*target['i']+1,2*target['j']+1))
+					f.write('{:d} {:d} {:d} {:d}\n'.format(e+1,e+1,na*target['i']+1,na*target['j']+1))
 					e += 1
 
-	def write_lammps_input(self, filename, datafile, dumpfile, duration, frames, temp=0, method=None, dt=0.005):
+	def write_lammps_input(self, filename, datafile, dumpfile, duration, frames, temp=0, method=None, symmetric=False, dt=0.005):
 		'''Write the input file for a LAMMPS simulation.
 		
 		Parameters
@@ -2259,6 +2405,8 @@ class Allosteric(Elastic):
 		method : str, optional
 			The type of simulation to run. If left as default (None), bonds are not trainable and have no
 			applied dashpots. Valid options are 'aging' or 'learning'.
+		symmetric : bool, optional
+			Whether to introduce a symmetric state for training with a different set of boundary conditions. Default is False.
 		dt : float, optional
 			Integration step size.
 		'''
@@ -2283,7 +2431,10 @@ class Allosteric(Elastic):
 			if method == None:
 				f.write('bond_style 		harmonic\n\n')
 			else:
-				f.write('bond_style 		harmonic/learning\n\n')
+				if symmetric:
+					f.write('bond_style 		harmonic/learning/symmetric\n\n')
+				else:
+					f.write('bond_style 		harmonic/learning\n\n')
 
 			f.write('read_data			{:s}\n\n'.format(datafile))
 			if temp > 0:
