@@ -647,6 +647,10 @@ class Allosteric(Elastic):
 
 		if not hasattr(ess, '__len__'): ess = len(self.sources)*[ess]
 		if not hasattr(ets, '__len__'): ets = len(self.targets)*[ets]
+		if symmetric:
+			es = ess[0]; et = ets[0]
+			ess = len(self.sources)*[et]
+			ets = len(self.targets)*[es]
 
 		for es, source in zip(ess, self.sources):
 			if np.abs(es) > 0:
@@ -717,6 +721,10 @@ class Allosteric(Elastic):
 
 		if not hasattr(ess, '__len__'): ess = len(self.sources)*[ess]
 		if not hasattr(ets, '__len__'): ets = len(self.targets)*[ets]
+		if symmetric:
+			es = ess[0]; et = ets[0]
+			ess = len(self.sources)*[et]
+			ets = len(self.targets)*[es]
 
 		for es, source in zip(ess, self.sources):
 			if np.abs(es) > 0:
@@ -1350,7 +1358,7 @@ class Allosteric(Elastic):
 		plt.close(fig)
 		return ani
 
-	def animate(self, spine=False, contour=False, figsize=(5,5), skip=1):
+	def animate(self, spine=False, contour=False, outline=False, figsize=(5,5), skip=1):
 		'''Animate the network after a simulation.
 		
 		Parameters
@@ -1361,6 +1369,8 @@ class Allosteric(Elastic):
 		contour : bool, optional
 			Whether to plot the contour of the whole network. Helps with decluttering
 			complicated networks when used with spine.
+		outline : bool, optional
+			Whether to outline nodes and edges with a black border. Default is False.
 		figsize : tuple, optional
 			The figure size.
 		skip : int, optional
@@ -1374,7 +1384,7 @@ class Allosteric(Elastic):
 			and running HTML(ani.to_html5_video()).
 		'''
 		if self.dim == 2: return self._animate_2d(figsize, skip)
-		else: return self._animate_3d(spine, contour, figsize, skip)
+		else: return self._animate_3d(spine, contour, outline, figsize, skip)
 
 	def _animate_2d(self, figsize=(5,5), skip=1):
 		'''Animate a 2D system.'''
@@ -1414,7 +1424,7 @@ class Allosteric(Elastic):
 		plt.close(fig)
 		return ani
 
-	def _animate_3d(self, spine=False, contour=False, figsize=(5,5), skip=1):
+	def _animate_3d(self, spine=False, contour=False, outline=False, figsize=(5,5), skip=1):
 		'''Animate a 3D system.'''
 
 		self.reset_init()
@@ -1447,9 +1457,29 @@ class Allosteric(Elastic):
 					  included = ["colors.inc", "textures.inc"])
 
 		mat = scene.render(width=width, height=height, antialiasing=0.01)
+
+		if outline:
+			focus = Scene(camera,
+						  objects = [bg]+lights+sources+targets,
+						  included = ["colors.inc", "textures.inc"])
+
+			mat_f = focus.render(width=width, height=height, antialiasing=0.01)
+			no_shadow = scene.render(width=width, height=height, antialiasing=0.0001, quality=1)
+			no_shadow_f = focus.render(width=width, height=height, antialiasing=0.0001, quality=1)
+
+			filt = np.array([filters.roberts(1.0*no_shadow[:,:,i]) for i in [0,1,2]])
+			out = np.dstack(3*[255*(filt.max(axis=0)==0)])
+			out = np.maximum(out, 120)
+
+			filt = np.array([filters.roberts(1.0*no_shadow_f[:,:,i]) for i in [0,1,2]])
+			out_f = np.dstack(3*[255*(filt.max(axis=0)==0)])
+			out_f = np.maximum(out_f, 72)
+			mat = np.minimum(np.minimum((0.75*mat+0.25*mat_f).astype(int), out), out_f)
+
 		im = ax.imshow(mat)
 		ax.axis('off')
 		fig.tight_layout()
+
 
 		def step(i):
 			print("Rendering frame {:d}/{:d}".format(i+1,frames+1), end="\r")
@@ -1471,6 +1501,25 @@ class Allosteric(Elastic):
 					  objects = [bg]+lights+spheres+edges+sources+targets+hull,
 					  included = ["colors.inc", "textures.inc"])
 			mat = scene.render(width=width, height=height, antialiasing=0.01)
+
+			if outline:
+				focus = Scene(camera,
+							  objects = [bg]+lights+sources+targets,
+							  included = ["colors.inc", "textures.inc"])
+
+				mat_f = focus.render(width=width, height=height, antialiasing=0.01)
+				no_shadow = scene.render(width=width, height=height, antialiasing=0.0001, quality=1)
+				no_shadow_f = focus.render(width=width, height=height, antialiasing=0.0001, quality=1)
+
+				filt = np.array([filters.roberts(1.0*no_shadow[:,:,i]) for i in [0,1,2]])
+				out = np.dstack(3*[255*(filt.max(axis=0)==0)])
+				out = np.maximum(out, 120)
+
+				filt = np.array([filters.roberts(1.0*no_shadow_f[:,:,i]) for i in [0,1,2]])
+				out_f = np.dstack(3*[255*(filt.max(axis=0)==0)])
+				out_f = np.maximum(out_f, 72)
+				mat = np.minimum(np.minimum((0.75*mat+0.25*mat_f).astype(int), out), out_f)
+
 			im.set_array(mat)
 			return im,
 
