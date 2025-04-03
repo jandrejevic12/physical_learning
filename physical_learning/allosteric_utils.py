@@ -249,8 +249,7 @@ class Allosteric(Elastic):
 
 		edges = list(self.graph.edges())
 
-		# exclude from consideration any edges which terminate at an existing source or target,
-		# or which have fewer than the specified number of connections.
+		
 		success = self._add_pairs_by_distance(n, edges, kind, seed)
 		if plot: self.plot()
 		return success
@@ -341,11 +340,15 @@ class Allosteric(Elastic):
 		'''
 
 		# exclude from consideration any edges which terminate at an existing source or target.
+		# exclude any edges which is going to be floppy(degree<dim+2)
 		excluded_nodes = []
 		for source in self.sources:
 			excluded_nodes += [source['i'], source['j']]
 		for target in self.targets:
 			excluded_nodes += [target['i'], target['j']]
+		min_degree = self.dim+2
+		for i in range(self.n):
+			if self.graph.degree(i) < min_degree: excluded_nodes += [i]
 
 		for e in range(len(edges)-1,-1,-1):
 			edge = edges[e]
