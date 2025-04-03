@@ -247,24 +247,10 @@ class Allosteric(Elastic):
 			Whether to plot the resulting network.
 		'''
 
-		min_degree = self.dim+2
 		edges = list(self.graph.edges())
 
 		# exclude from consideration any edges which terminate at an existing source or target,
 		# or which have fewer than the specified number of connections.
-		excluded_nodes = []
-		for source in self.sources:
-			excluded_nodes += [source['i'], source['j']]
-		for target in self.targets:
-			excluded_nodes += [target['i'], target['j']]
-
-		for i in range(self.n):
-			if self.graph.degree(i) < min_degree: excluded_nodes += [i]
-
-		for e in range(len(edges)-1,-1,-1):
-			edge = edges[e]
-			if edge[0] in excluded_nodes or edge[1] in excluded_nodes: edges.pop(e)
-
 		success = self._add_pairs_by_distance(n, edges, kind, seed)
 		if plot: self.plot()
 		return success
@@ -292,7 +278,7 @@ class Allosteric(Elastic):
 			Whether all edge selections were successful. If False, not all edges could be added.
 		'''
 
-		vor, tri, edges = self._find_boundary_pairs()
+		edges = self._find_boundary_pairs()
 		success = self._add_pairs_by_distance(n, edges, kind, seed)
 		if plot: self.plot()
 		return success
@@ -334,10 +320,10 @@ class Allosteric(Elastic):
 					   or (self.graph.has_edge(p[0],p[1]) and self.graph.degree(p[0]) >= min_degree+1
 					   and self.graph.degree(p[1]) >=min_degree+1)]
 
-		return vor, tri, bound_pairs
+		return bound_pairs
 
 	def _add_pairs_by_distance(self, n, edges, kind, seed):
-		'''Incrementally select from edges the n best separated pairs as new sources or targets.
+		'''Incrementally select from edges the n best separated pairs as new sources or targets. Prefer distant new pairs
 		
 		Parameters
 		----------
@@ -354,11 +340,6 @@ class Allosteric(Elastic):
 			Whether all edge selections were successful. If False, not all edges could be added.
 		'''
 
-		nadd = 0
-		if len(edges) < 1:
-			print("Not enough valid pairs; successfully added {:d} of {:d} {:s}(s).".format(nadd,n,kind))
-			return False
-
 		# exclude from consideration any edges which terminate at an existing source or target.
 		excluded_nodes = []
 		for source in self.sources:
@@ -369,6 +350,7 @@ class Allosteric(Elastic):
 		for e in range(len(edges)-1,-1,-1):
 			edge = edges[e]
 			if edge[0] in excluded_nodes or edge[1] in excluded_nodes: edges.pop(e)
+
 
 		# compute the smallest distance of each edge to current sources and targets, in order
 		# to place the new source(s) or target(s) maximally away.
@@ -387,7 +369,7 @@ class Allosteric(Elastic):
 		np.random.seed(seed)
 		for p in range(n):
 			if len(edges) < 1:
-				print("Not enough valid pairs; successfully added {:d} of {:d} {:s}(s).".format(nadd,n,kind))
+				print("Not enough valid pairs; successfully added {:d} of {:d} {:s}(s).".format(p,n,kind))
 				return False
 			if (len(self.sources) == 0) and (len(self.targets) == 0): # select first one at random, otherwise maximize distance.
 				e = np.random.randint(len(edges))
@@ -400,7 +382,6 @@ class Allosteric(Elastic):
 				self.sources += pair
 			else:
 				self.targets += pair
-			nadd += 1
 			if self.graph.has_edge(i,j):
 				self.graph.remove_edge(i,j)
 			edges.pop(e)
