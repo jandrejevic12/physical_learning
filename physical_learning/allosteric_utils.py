@@ -1,5 +1,5 @@
 import numpy as np
-
+from povray import Scene
 from plot_imports import *
 from elastic_utils import Elastic
 
@@ -1265,7 +1265,7 @@ class Allosteric(Elastic):
 
 		return nodes, pairs
 
-	def rotate(self, spine=False, contour=False, skip=1):
+	def rotate(self, spine=False, contour=False, skip=1,figsize=(5,5)):
 		'''Animate camera and light rotation about a static scene.
 
 		Parameters
@@ -1292,7 +1292,7 @@ class Allosteric(Elastic):
 
 		frames = 200//skip
 		
-		fig, ax = plt.subplots(1,1,figsize=(5,5))
+		fig, ax = plt.subplots(1,1,figsize=figsize)
 		width = int(100*figsize[0]); height = int(100*figsize[1])
 
 		bg, lights, camera = self._povray_setup()
@@ -2517,8 +2517,8 @@ class Allosteric(Elastic):
 			f.write('#!/bin/bash\n')
 			f.write('#SBATCH --job-name="{:s}"\n'.format(jobname))
 			f.write('#SBATCH --mail-type=FAIL\n')
-			f.write('#SBATCH --mail-user=jovana@sas.upenn.edu\n')
-			f.write('#SBATCH --partition=compute\n')
+			f.write('#SBATCH --mail-user=yueshang@sas.upenn.edu\n')
+			f.write('#SBATCH --partition=liu_compute\n')
 			f.write('#SBATCH --time="{:d}:00:00"\n\n'.format(hours))
 			f.write('srun -n 1 {:s}\n'.format(cmd))
 
