@@ -249,7 +249,7 @@ class Elastic(object):
 	*****************************************************************************************************
 	'''
 
-	def solve(self, duration, frames, T, applied_args, train=0, method='learning', eta=1., alpha=1e-3, vmin=1e-3, vsmooth=None, fix=0, symmetric=False, pbar=True, integrator='LSODA', rtol=1e-6, atol=1e-8):	
+	def solve(self, duration, frames, T, applied_args, train=0, method='learning', eta=1., alpha=1e-3, reg = np.array([0,0]),vmin=1e-3, vsmooth=None, vmax=10, vmaxsmooth=9, fix=0, symmetric=False, pbar=True, integrator='LSODA', rtol=1e-6, atol=1e-8):	
 		'''Numerically integrate the elastic network in time.
 
 		This routine optionally trains edge stiffnesses or rest lengths using directed aging or
@@ -280,12 +280,18 @@ class Elastic(object):
 		alpha : float or ndarray, optional
 			Learning rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
 			If reported as an ndarray of 2 entries, provides the alpha for rest lengths, then stiffnesses.
+       reg :nparray, optional
+            Energy regularization parameter, modulating the cost function in the following way:
+            Cost = E_c - F_f -reg*E_f = E_c - (1+reg)E_f
+            The second value is used in the symmetric case. Setting different values allows for biased regularization.
 		vmin : float or ndarray, optional
 			The smallest allowed value for each learning degree of freedom. Default is 1e-3. If reported as
 			an ndarray of 2 entries, provides the vmin for rest lengths, then stiffnesses.
 		vsmooth : float or ndarray, optional
 			The value of the learning degree of freedom at which to begin smooth ramping to vmin. If reported as
 			an ndarray of 2 entries, provides the vsmooth for rest lengths, then stiffnesses.
+        vmax : same as vmin
+        vmaxsmooth : same as vsmooth
 		fix : ndarray, optional
 			An (n,3) array indicating which degrees of freedom should remain fixed and not integrated. If default (0),
 			all degrees of freedom are integrated.
@@ -329,12 +335,16 @@ class Elastic(object):
 
 		if not hasattr(alpha, '__len__'): alpha = [alpha, alpha]
 		if not hasattr(vmin, '__len__'): vmin = [vmin, vmin]
+		if not hasattr(vmax, '__len__'): vmax = [vmax, vmax]
 
 		if vsmooth is None:
 			vsmooth = [vmin[0] + 0.1*np.mean(edge_l), vmin[1] + 0.1*np.mean(edge_k)]
+		if vmaxsmooth is None:
+			vmaxsmooth = [vmax[0] - 0.1*np.mean(edge_l), vmmax[1] - 0.1*np.mean(edge_k)]
 
 		if not hasattr(vsmooth, '__len__'): vsmooth = [vsmooth, vsmooth]
-
+		if not hasattr(vmaxsmooth, '__len__'): vmaxsmooth = [vmaxsmooth, vmaxsmooth]
+		
 		ti = 0; tf = duration
 		t_span = [ti, tf]
 		if not hasattr(frames, '__len__'):
@@ -349,13 +359,13 @@ class Elastic(object):
 					  bar_format='{l_bar}{bar}| {n:.2f}/{total:.2f} [{elapsed}<{remaining}]', desc='progress') as self.pbar:
 				
 				sol = solve_ivp(self._ff, t_span, q, t_eval=self.t_eval, jac=self._jj,
-								args=(T, fix.ravel(), network, applied_args, train, method, eta, alpha, vmin, vsmooth, symmetric, pbar),
-								method=integrator, rtol=rtol, atol=atol)
+								args=(T, fix.ravel(), network, applied_args, train, method, eta, alpha, reg, vmin, vsmooth, vmax, vmaxsmooth, symmetric, pbar),
+								method=integrator, rtol=rtol, atol=atol,first_step=0.01)
 
 		else:
 			sol = solve_ivp(self._ff, t_span, q, t_eval=self.t_eval, jac=self._jj,
-							args=(T, fix.ravel(), network, applied_args, train, method, eta, alpha, vmin, vsmooth, symmetric, pbar),
-							method=integrator, rtol=rtol, atol=atol)
+							args=(T, fix.ravel(), network, applied_args, train, method, eta, alpha, reg, vmin, vsmooth, vmax, vmaxsmooth, symmetric, pbar),
+							method=integrator, rtol=rtol, atol=atol,first_step=0.01)
 
 		if sol.status != 0:
 			return sol
@@ -469,6 +479,8 @@ class Elastic(object):
 			- alpha: Learning rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
 			- vmin: The smallest allowed value for each learning degree of freedom.
 			- vsmooth: The value of each learning degree of freedom at which to begin smooth ramp down to vmin.
+            - vmax: similar to vmin
+			- vmaxsmooth: similar to vsmooth
 			- symmetric: Whether to train symmetrically with an additional free and clamped state.
 			- pbar: Whether to display a progress bar. Default is True. 
 
@@ -478,7 +490,7 @@ class Elastic(object):
 			Total energy of the network.
 		'''
 
-		T, fix, network, applied_args, train, method, eta, alpha, vmin, vsmooth, symmetric, pbar = args
+		T, fix, network, applied_args, train, method, eta, alpha, reg, vmin, vsmooth, vmax, vmaxsmooth, symmetric, pbar = args
 		edge_i, edge_j, edge_k, edge_l, edge_t = network
 		n = self.n
 		ne = self.ne
@@ -527,6 +539,8 @@ class Elastic(object):
 			- alpha: Learning rate of each learning degree of freedom (stiffnesses or rest lengths). Default is 1e-3.
 			- vmin: The smallest allowed value for each learning degree of freedom.
 			- vsmooth: The value of each learning degree of freedom at which to begin smooth ramp down to vmin.
+            - vmax: similar to vmin
+            - vmaxsmooth: similar to vsmooth
 			- symmetric: Whether to train symmetrically with an additional free and clamped state.
 			- pbar: Whether to display a progress bar. Default is True. 
 
@@ -536,7 +550,7 @@ class Elastic(object):
 			Derivative of the degrees of freedom.
 		'''
 
-		T, fix, network, applied_args, train, method, eta, alpha, vmin, vsmooth, symmetric, pbar = args
+		T, fix, network, applied_args, train, method, eta, alpha, reg, vmin, vsmooth, vmax, vmaxsmooth, symmetric, pbar = args
 		edge_i, edge_j, edge_k, edge_l, edge_t = network
 		n = self.n
 		ne = self.ne
@@ -582,9 +596,9 @@ class Elastic(object):
 						self._length_update_aging(t, n, q_s, q_sc, k, l, dl, eta, alpha[0], vmin[0], vsmooth[0], network)
 			if train & 2:
 				if method == 'learning':
-					self._stiffness_update_learning(t, n, q, q_c, k, l, dk, eta, alpha[1], vmin[1], vsmooth[1], network)
+					self._stiffness_update_learning(t, n, q, q_c, k, l, dk, eta, alpha[1], reg[0], vmin[1], vsmooth[1], vmax[1], vmaxsmooth[1], network)
 					if symmetric:
-						self._stiffness_update_learning(t, n, q_s, q_sc, k, l, dk, eta, alpha[1], vmin[1], vsmooth[1], network)
+						self._stiffness_update_learning(t, n, q_s, q_sc, k, l, dk, eta, alpha[1], reg[1], vmin[1], vsmooth[1], vmax[1], vmaxsmooth[1], network)
 				else:
 					self._stiffness_update_aging(t, n, q, q_c, k, l, dk, eta, alpha[1], vmin[1], vsmooth[1], network)
 					if symmetric:
@@ -673,7 +687,7 @@ class Elastic(object):
 			Jacobian of the derivative.
 		'''
 
-		T, fix, network, applied_args, train, method, eta, alpha, vmin, vsmooth, symmetric, pbar = args
+		T, fix, network, applied_args, train, method, eta, alpha, reg, vmin, vsmooth, vmax, vmaxsmooth, symmetric, pbar = args
 		edge_i, edge_j, edge_k, edge_l, edge_t = network
 		n = self.n
 		ne = self.ne
@@ -774,9 +788,9 @@ class Elastic(object):
 
 			if train & 2:
 				if method == 'learning':
-					self._stiffness_jacobian_learning(t, n, q, q_c, k, l, dgkdx, dgkdx_c, dgkdk, dgkdl, eta, alpha[1], vmin[1], vsmooth[1], network)
+					self._stiffness_jacobian_learning(t, n, q, q_c, k, l, dgkdx, dgkdx_c, dgkdk, dgkdl, eta, alpha[1], reg[0], vmin[1], vsmooth[1], vmax[1], vmaxsmooth[1], network)
 					if symmetric:
-						self._stiffness_jacobian_learning(t, n, q_s, q_sc, k, l, dgkdx_s, dgkdx_sc, dgkdk, dgkdl, eta, alpha[1], vmin[1], vsmooth[1], network)
+						self._stiffness_jacobian_learning(t, n, q_s, q_sc, k, l, dgkdx_s, dgkdx_sc, dgkdk, dgkdl, eta, alpha[1], reg[1], vmin[1], vsmooth[1], vmax[1], vmaxsmooth[1], network)
 				else:
 					self._stiffness_jacobian_aging(t, n, q, q_c, k, l, dgkdx, dgkdx_c, dgkdk, dgkdl, eta, alpha[1], vmin[1], vsmooth[1], network)
 					if symmetric:
@@ -1581,7 +1595,7 @@ class Elastic(object):
 
 	@staticmethod
 	@jit(nopython=True)
-	def _stiffness_update_learning(t, n, q, q_c, k, l, dk, eta, alpha, kmin, ksmooth, network):
+	def _stiffness_update_learning(t, n, q, q_c, k, l, dk, eta, alpha, reg, kmin, ksmooth, kmax, kmaxsmooth, network):
 		'''Apply an update to edge stiffnesses using coupled learning.
 		
 		Parameters
@@ -1604,6 +1618,8 @@ class Elastic(object):
 			The nudge factor.
 		alpha : float
 			The learning rate.
+        reg : float
+            The regularization of the free energy
 		kmin : float
 			The minimum allowed stiffness.
 		ksmooth : float
@@ -1632,11 +1648,17 @@ class Elastic(object):
 				if s < 0: s = 0
 				if s > 1: s = 1
 				sf = s*s*s*(s*(s*6-15)+10)
-				dk[e] += 0.5*alpha/eta*((r-l[e])**2-(r_c-l[e])**2)*sf
+                
+				s2=(kmax-k[e])/(kmax-kmaxsmooth)
+				if s2 < 0: s2=0
+				if s2 > 1: s2=1
+				sf2 = s2*s2*s2*(s2*(s2*6-15)+10)
+				
+				dk[e] += 0.5*alpha/eta*((1+reg)*(r-l[e])**2-(r_c-l[e])**2)*sf*sf2
 
 	@staticmethod
 	@jit(nopython=True)
-	def _stiffness_jacobian_learning(t, n, q, q_c, k, l, dgdx, dgdx_c, dgdk, dgdl, eta, alpha, kmin, ksmooth, network):
+	def _stiffness_jacobian_learning(t, n, q, q_c, k, l, dgdx, dgdx_c, dgdk, dgdl, eta, alpha, reg, kmin, ksmooth, kmax, kmaxsmooth, network):
 		'''Jacobian for stiffness udpate.
 		
 		Parameters
@@ -1665,6 +1687,8 @@ class Elastic(object):
 			The nudge factor.
 		alpha : float
 			The learning rate.
+        reg : float
+            The regularization of the free energy
 		kmin : float
 			The minimum allowed stiffness.
 		ksmooth : float
@@ -1693,9 +1717,15 @@ class Elastic(object):
 				if s > 1: s = 1
 				sf = s*s*s*(s*(s*6-15)+10)
 				dsf = 30*s*s*(s*(s-2)+1)/(ksmooth-kmin)
+				
+				s2=(kmax-k[e])/(kmax-kmaxsmooth)
+				if s2 < 0: s2=0
+				if s2 > 1: s2=1
+				sf2 = s2*s2*s2*(s2*(s2*6-15)+10)
+				dsf2 = 30*s2*s2*(s2*(s2-2)+1)/(kmax-kmaxsmooth)
 
-				fac = alpha/eta*sf
-				rfac = (1 - l[e]/r)
+				fac = alpha/eta*sf*sf2
+				rfac = (1+reg)*(1 - l[e]/r)
 				rfac_c = (1 - l[e]/r_c)
 
 				dgdx[e,3*i] += fac*rfac*dx
@@ -1712,8 +1742,8 @@ class Elastic(object):
 				dgdx_c[e,3*j+1] += fac*rfac_c*dy_c
 				dgdx_c[e,3*j+2] += fac*rfac_c*dz_c
 
-				dgdk[e,e] += 0.5*alpha/eta*((r-l[e])**2-(r_c-l[e])**2)*dsf
-				dgdl[e,e] += -alpha/eta*(r-r_c)*sf
+				dgdk[e,e] += 0.5*alpha/eta*((r-l[e])**2-(r_c-l[e])**2)*dsf*dsf2
+				dgdl[e,e] += -alpha/eta*(r-r_c)*sf*sf2 #the fact that I added sf2 here is premature, I didn't fully implement the changes for restlengths
 
 	@staticmethod
 	@jit(nopython=True)
@@ -1915,7 +1945,7 @@ class Elastic(object):
 
 		t = 0
 		hess = np.zeros((3*self.n,3*self.n))
-		q = np.hstack([self.pts.ravel(),np.zeros(3*self.n)])
+		q = np.hstack([self.pts.ravel(),np.zeros(3*self.n)]) #this assumes the the network is in equalibrium position
 		mask = np.zeros(3*self.n, dtype=bool)
 		mask[::3] = self.degree > 0
 		mask[1::3] = self.degree > 0
@@ -1932,7 +1962,7 @@ class Elastic(object):
 		evals, evecs = np.linalg.eigh(-hess)
 		return evals, evecs
 
-	def rigid_correction(self):
+	def rigid_correction(self, ref_pts=None):
 		'''Find the nearest Procrustes transformation (translation + rotation) to the first frame.
 
 		Returns
@@ -1940,8 +1970,10 @@ class Elastic(object):
 		ndarray
 			The particles' trajectories corrected for rigid translation and rotation.
 		'''
-
-		b = self.traj[0] - np.mean(self.traj[0], axis=0)
+		if ref_pts is None:
+			b = self.traj[0] - np.mean(self.traj[0], axis=0)
+		else:
+			b = ref_pts - np.mean(ref_pts, axis=0)
 		traj = np.zeros_like(self.traj)
 		for i in range(len(self.traj)):
 			a = self.traj[i]-np.mean(self.traj[i], axis=0)
@@ -2098,9 +2130,9 @@ class Elastic(object):
 		camera = Camera('location', cpos, 'sky', 'z', 'look_at', [0,0,0])
 		return bg, lights, camera
 
-	def _povray_spheres(self, nodes):
+	def _povray_spheres(self, nodes,alpha_spheres=0):
 		spheres = [0 for _ in range(len(nodes))]
-		c = 'rgb<0.35,0.7,0.7>'
+		c = 'rgbt<0.35,0.7,0.7 {}>'.format(alpha_spheres)
 		r = 5*self.params['radius']
 		for i,node in enumerate(nodes):
 			spheres[i] = Sphere(self.pts[node], r,
@@ -2109,16 +2141,39 @@ class Elastic(object):
 						 'specular',0.3,'phong',0.2,'phong_size',5)))
 		return spheres
 
-	def _povray_edges(self, pairs):
+	def _povray_edges(self, pairs,alpha_edges=0,reference_thickness=False,strain_coloring=False,strains=False,strain_cmap=False):
 		edges = [0 for _ in range(len(pairs))]
-		c = 'rgb<0.1,0.3,0.3>'
+		c = 'rgbt<0.1,0.3,0.3 {}>'.format(alpha_edges)
 		r = self.params['radius']
+		if reference_thickness: r=reference_thickness;
 		for i,pair in enumerate(pairs):
+			if strain_coloring: c = strain_cmap(strains[i])
 			edges[i] = Cylinder(self.pts[pair[0]], self.pts[pair[1]], r,
 						   Texture(Pigment('color',c),
 						   Finish('ambient',0.24,'diffuse',0.88,
 						   'specular',0.1,'phong',0.2,'phong_size',5)))
 		return edges
+
+	def _povray_edges_with_thickness(self, pairs,alpha_edges=0,reference_thickness=False,strain_coloring=False,strains=False,strain_cmap=False):
+		Edges = [0 for _ in range(len(pairs))]
+		c = 'rgbt<0.1,0.3,0.3 {}>'.format(alpha_edges)
+		
+		avg_stiffness = 0
+		for i,edge in enumerate(self.graph.edges(data=True)):
+			avg_stiffness+=edge[2]['stiffness']
+		avg_stiffness/=len(pairs)
+			
+		r = self.params['radius']/avg_stiffness
+		if reference_thickness: r=reference_thickness;
+        
+		for i,edge in enumerate(self.graph.edges(data=True)):
+			if strain_coloring: c = strain_cmap(strains[i])
+			stiffness = edge[2]['stiffness']
+			Edges[i] = Cylinder(self.pts[edge[0]], self.pts[edge[1]], r*stiffness,
+						   Texture(Pigment('color',c),
+						   Finish('ambient',0.24,'diffuse',0.88,
+						   'specular',0.1,'phong',0.2,'phong_size',5)))
+		return Edges
 
 	def _povray_hull(self):
 		hull = ConvexHull(self.pts)
@@ -2147,7 +2202,7 @@ class Elastic(object):
 						   'specular',0.1,'phong',0.2,'phong_size',5)))
 		return edges
 
-	def plot_network(self, ax):
+	def plot_network(self, ax,thickness=False,alpha_spheres=0,alpha_edges=0,reference_thickness=False,strain_coloring=False,strains=False,strain_cmap=False):
 		'''Plot the network.
 
 		Parameters
@@ -2157,7 +2212,7 @@ class Elastic(object):
 		'''
 
 		if self.dim == 2: return self._plot_network_2d(ax)
-		else: return self._plot_network_3d(ax)
+		else: return self._plot_network_3d(ax,thickness,alpha_spheres=alpha_spheres,alpha_edges=alpha_edges,reference_thickness=reference_thickness,strain_coloring=strain_coloring,strains=strains,strain_cmap=strain_cmap)
 
 	def _plot_network_2d(self, ax):
 		'''Plot the network.
@@ -2187,7 +2242,7 @@ class Elastic(object):
 		ax.add_collection(dc)
 		return ec, dc
 
-	def _plot_network_3d(self, ax):
+	def _plot_network_3d(self, ax,thickness=False,alpha_spheres=0,alpha_edges=0,reference_thickness=False,strain_coloring=False,strains=False,strain_cmap=False):
 		'''Plot the network.
 
 		Parameters
@@ -2202,7 +2257,10 @@ class Elastic(object):
 		edges : list of vapory.Cylinder objects
 			Network edges to plot.
 		'''
-		return self._povray_spheres(np.arange(self.n).astype(int)), self._povray_edges(self.graph.edges())
+		x = self._povray_edges(self.graph.edges(),alpha_edges=alpha_edges,reference_thickness=reference_thickness,strain_coloring=strain_coloring,strains=strains,strain_cmap=strain_cmap)
+		if thickness:
+			x = self._povray_edges_with_thickness(self.graph.edges(),alpha_edges=alpha_edges,reference_thickness=reference_thickness,strain_coloring=strain_coloring,strains=strains,strain_cmap=strain_cmap)
+		return self._povray_spheres(np.arange(self.n).astype(int),alpha_spheres=alpha_spheres), x
 
 
 

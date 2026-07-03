@@ -30,9 +30,11 @@ class Packing:
 	params : dict, optional
 		Specifies system parameters. Required keywords are :
 
-		- 'central': strength of the force pulling spheres toward origin
+		- 'radial': strength of the radial force of the enclosing spherical shell pushing spheres inward
+		- 'rate': rate at which the spherical shell radius decreases
 		- 'drag': coefficient of isotropic drag
 		- 'contact': strength of contact repulsion
+		- 'Rf': final radius of the spherical shell at which shrinking should stop.
 
 	seed : int, optional
 		A random seed used for initializing the positions of the spheres, and assigning
@@ -59,7 +61,7 @@ class Packing:
 	'''
 
 	def __init__(self, n, dim=2, radius=0, rfac=0.8,
-				 params={'central':0.0005, 'drag':0.05, 'contact':0.1}, seed=12):
+				 params={'radial':0.1, 'rate': 0.0005, 'drag':0.05, 'contact':0.1, 'Rf': 0.2, 'Ri':None}, seed=12):
 		
 		if (dim != 2) and (dim != 3):
 			raise ValueError("Dimension must be 2 or 3.")
@@ -254,6 +256,7 @@ class Packing:
 			The number of output frames to produce (excluding initial frame).
 		'''
 
+		self.params['Ri'] = np.sqrt(np.max(np.sum(np.square(self.pts), axis=1))) + max(self.radii[0], self.radii[1])
 		q = np.hstack([self.pts.ravel(),np.zeros(3*self.n)])
 		ti = 0; tf = duration
 		t_span = [ti, tf]
@@ -283,10 +286,14 @@ class Packing:
 		pos, vel = q[:3*n], q[3*n:]
 		acc = np.zeros(3*n)
 		
-		# compute central force and drag.
+		# compute radial force and drag.
 		b = self.params['drag']
-		c = self.params['central']
-		self._central_force(t, n, pos, vel, acc, b, c)
+		c = self.params['radial']
+		g = self.params['rate']
+		ri = self.params['Ri']
+		rf = self.params['Rf']
+
+		self._radial_force(t, n, pos, vel, acc, b, c, g, ri, rf)
 		
 		# compute contact forces.
 		c = self.params['contact']
@@ -302,7 +309,7 @@ class Packing:
 				i, j = edge[0], edge[1]
 				edge_i[e] = i; edge_j[e] = j
 				pair_type[e] = (self.labels[i] == a and self.labels[j] == b) or \
-			   				   (self.labels[i] == b and self.labels[j] == a)
+							   (self.labels[i] == b and self.labels[j] == a)
 			self._contact_force(t, n, pos, acc, c, d, (edge_i, edge_j, pair_type))
 
 		dq = np.hstack([vel, acc])
@@ -331,8 +338,12 @@ class Packing:
 
 		# compute central force and drag jacobian.
 		b = self.params['drag']
-		c = self.params['central']
-		self._central_jacobian(t, n, pos, vel, jac, b, c)
+		c = self.params['radial']
+		g = self.params['rate']
+		ri = self.params['Ri']
+		rf = self.params['Rf']
+
+		self._radial_jacobian(t, n, pos, vel, jac, b, c, g, ri, rf)
 		
 		# compute contact jacobian.
 		c = self.params['contact']
@@ -348,15 +359,15 @@ class Packing:
 				i, j = edge[0], edge[1]
 				edge_i[e] = i; edge_j[e] = j
 				pair_type[e] = (self.labels[i] == a and self.labels[j] == b) or \
-			   				   (self.labels[i] == b and self.labels[j] == a)
+							   (self.labels[i] == b and self.labels[j] == a)
 			self._contact_jacobian(t, n, pos, jac, c, d, (edge_i, edge_j, pair_type))
 
 		return jac
 
 	@staticmethod
 	@jit(nopython=True)
-	def _central_force(t, n, pos, vel, acc, b, c):
-		'''Apply a central force pulling spheres toward origin.
+	def _radial_force(t, n, pos, vel, acc, b, c, g, ri, rf):
+		'''Apply a radial force pushing spheres within a prescribed radius.
 
 		Also stabilizes the simulation with isotropic drag.
 		
@@ -375,20 +386,36 @@ class Packing:
 		b : float
 			Drag coefficient.
 		c : float
-			Central force strength.
+			Radial force strength.
+		g : float
+			Radial force rate.
+		ri : float
+			Initial radius of the spherical shell.
+		rf : float
+			Final radius of the spherical shell.
 		'''
 
+		rs = ri - g*t
+		if rs < rf: rs = rf
+		rs2 = rs * rs
 		for i in range(n):
 			x, y, z = pos[3*i], pos[3*i+1], pos[3*i+2]
 			vx, vy, vz = vel[3*i], vel[3*i+1], vel[3*i+2]
-			acc[3*i] -= b*vx + c*x
-			acc[3*i+1] -= b*vy + c*y
-			acc[3*i+2] -= b*vz + c*z
+			acc[3*i] -= b*vx
+			acc[3*i+1] -= b*vy
+			acc[3*i+2] -= b*vz
+
+			r2 = x*x + y*y + z*z
+			if r2 > rs2:
+				fac = -c*(1-rs/np.sqrt(r2))
+				acc[3*i] += fac*x
+				acc[3*i+1] += fac*y
+				acc[3*i+2] += fac*z
 
 	@staticmethod
 	@jit(nopython=True)
-	def _central_jacobian(t, n, pos, vel, jac, b, c):
-		'''Compute the jacobian of the central forces.
+	def _radial_jacobian(t, n, pos, vel, jac, b, c, g, ri, rf):
+		'''Compute the jacobian of the radial forces.
 		
 		Parameters
 		----------
@@ -405,9 +432,18 @@ class Packing:
 		b : float
 			Drag coefficient.
 		c : float
-			Central force strength.
+			Radial force strength.
+		g : float
+			Radial force rate.
+		ri : float
+			Initial radius of the spherical shell.
+		rf : float
+			Final radius of the spherical shell.
 		'''
 
+		rs = ri - g*t
+		if rs < rf: rs = rf
+		rs2 = rs * rs
 		for i in range(n):
 			x, y, z = pos[3*i], pos[3*i+1], pos[3*i+2]
 			vx, vy, vz = vel[3*i], vel[3*i+1], vel[3*i+2]
@@ -415,15 +451,35 @@ class Packing:
 			jac[3*i,3*n+3*i] += 1.
 			jac[3*i+1,3*n+3*i+1] += 1.
 			jac[3*i+2,3*n+3*i+2] += 1.
+
+			jac[3*n+3*i,3*n+3*i] -= b
+			jac[3*n+3*i+1,3*n+3*i+1] -= b
+			jac[3*n+3*i+2,3*n+3*i+2] -= b
 			
 			jac[3*n+3*i,3*i] -= c
 			jac[3*n+3*i+1,3*i+1] -= c
 			jac[3*n+3*i+2,3*i+2] -= c
 
-			
-			jac[3*n+3*i,3*n+3*i] -= b
-			jac[3*n+3*i+1,3*n+3*i+1] -= b
-			jac[3*n+3*i+2,3*n+3*i+2] -= b
+			r2 = x*x + y*y + z*z
+			if r2 > rs2:
+				fac = rs/np.sqrt(r2)
+				xx = -c*(fac*(x*x/r2-1)+1);
+				yy = -c*(fac*(y*y/r2-1)+1);
+				zz = -c*(fac*(z*z/r2-1)+1);
+				xy = -c*fac*x*y/r2;
+				xz = -c*fac*x*z/r2;
+				yz = -c*fac*y*z/r2;
+
+				jac[3*n+3*i,3*i] += xx
+				jac[3*n+3*i+1,3*i+1] += yy
+				jac[3*n+3*i+2,3*i+2] += zz
+				jac[3*n+3*i,3*i+1] += xy
+				jac[3*n+3*i+1,3*i] += xy
+				jac[3*n+3*i,3*i+2] += xz
+				jac[3*n+3*i+2,3*i] += xz
+				jac[3*n+3*i+1,3*i+2] += yz
+				jac[3*n+3*i+2,3*i+1] += yz
+
 
 	@staticmethod
 	@jit(nopython=True)
@@ -712,6 +768,7 @@ class Packing:
 					  included = ["colors.inc", "textures.inc"])
 
 		mat = scene.render(width=width, height=height, antialiasing=0.01)
+		scene.render(width=width, height=height, antialiasing=0.01, outfile="out.png")
 		ax.imshow(mat)
 		ax.axis('off')
 		fig.tight_layout()

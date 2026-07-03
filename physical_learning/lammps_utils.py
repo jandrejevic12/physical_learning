@@ -200,7 +200,7 @@ def setup_run(allo, odir, prefix, lmp_path, duration, frames, applied_args, trai
 	print("Navigate to directory and run: {:s}".format(cmd))
 	print("Or, navigate to directory and submit the job to the queue: sbatch job.sh")
 
-def load_run(odir):
+def load_run(odir, allo_dir=None):
 	'''Load a complete LAMMPS simulation from its directory.
 
 	The directory should contain an Allosteric network file, LAMMPS datafile,
@@ -222,15 +222,17 @@ def load_run(odir):
 	cols : list of str
 		The column names associated with each data column.
 	'''
-
+	if allo_dir==None: allo_dir=odir
 	# collect all filenames
 	if odir[-1] != '/' : odir += '/'
-	netfile = glob.glob(odir+'*.txt')[0]
+	# netfile = glob.glob(odir+'*.txt')[0]
+	netfile = glob.glob(allo_dir+'*.txt')[0]
 	datafile = glob.glob(odir+'*.data')[0]
 	infile = glob.glob(odir+'*.in')[0]
 	dumpfile = glob.glob(odir+'*.dump')[0]
 	logfile = glob.glob(odir+'*.log')[0]
-
+	# print(netfile)
+	# print(datafile)
 	allo = Allosteric(netfile)
 	dim = read_dim(infile)
 	if dim != allo.dim:
@@ -269,6 +271,89 @@ def load_run(odir):
 
 	return allo, data, cols
 
+def load_run2(odir, allo_dir=None, prefix=None):
+	'''Load a complete LAMMPS simulation from its directory.
+
+	The directory should contain an Allosteric network file, LAMMPS datafile,
+	dumpfile, and logfile.
+	   
+	Parameters
+	----------
+	odir : str
+		The path to the directory.
+
+	Returns
+	-------
+	allo : Allosteric
+		Allosteric Class object with network set up according to provided LAMMPS datafile,
+		with simulation history loaded from dumpfile.
+	data : ndarray
+		The log data (typically printed to screen) of the simulation at each
+		integration timestep.
+	cols : list of str
+		The column names associated with each data column.
+	'''
+	if allo_dir==None: allo_dir=odir
+	# collect all filenames
+	if odir[-1] != '/' : odir += '/'
+	# netfile = glob.glob(odir+'*.txt')[0]
+	if prefix==None:
+		netfile = glob.glob(allo_dir+'*.txt')[0]
+		datafile = glob.glob(odir+'*.data')[0]
+		infile = glob.glob(odir+'*.in')[0]
+		dumpfile = glob.glob(odir+'*.dump')[0]
+		logfile = glob.glob(odir+'*.log')[0]
+		# print('here')
+		# print(netfile)
+		# print('there')
+	else:
+		# print('not none')
+		netfile = allo_dir+'allo.txt'
+		datafile = odir+prefix+'.data'
+		infile = odir+prefix+'.in'
+		dumpfile = odir+prefix+'.dump'
+		logfile = odir+prefix+'.log'
+		# print('here')
+		# print(netfile)
+		# print('there')
+	allo = Allosteric(netfile)
+	dim = read_dim(infile)
+	if dim != allo.dim:
+		raise ValueError("Dimension mismatch between LAMMPS simulation (d={:d}) and network file (d={:d}).".format(dim,allo.dim))
+	read_data(datafile, allo.graph)
+	data, cols = read_log(logfile)
+	allo.t_eval = data[:,cols.index('Time')]
+	traj, vtraj = read_dump(dumpfile)
+	if traj.shape[1] == allo.n: # free state only
+		allo.traj = np.copy(traj)
+		allo.vtraj = np.copy(vtraj)
+		allo.traj_c = np.copy(traj)
+		allo.vtraj_c = np.copy(vtraj)
+		allo.traj_s = np.copy(traj)
+		allo.vtraj_s = np.copy(vtraj)
+		allo.traj_sc = np.copy(traj)
+		allo.vtraj_sc = np.copy(vtraj)
+	elif traj.shape[1] == 2*allo.n: # free and clamped states
+		allo.traj = np.copy(traj[:,1::2,:])
+		allo.vtraj = np.copy(vtraj[:,1::2,:])
+		allo.traj_c = np.copy(traj[:,::2,:])
+		allo.vtraj_c = np.copy(vtraj[:,::2,:])
+		allo.traj_s = np.copy(traj[:,1::2,:])
+		allo.vtraj_s = np.copy(vtraj[:,1::2,:])
+		allo.traj_sc = np.copy(traj[:,::2,:])
+		allo.vtraj_sc = np.copy(vtraj[:,::2,:])
+	else: # symmetric free and clamped states
+		allo.traj = np.copy(traj[:,1::4,:])
+		allo.vtraj = np.copy(vtraj[:,1::4,:])
+		allo.traj_c = np.copy(traj[:,::4,:])
+		allo.vtraj_c = np.copy(vtraj[:,::4,:])
+		allo.traj_s = np.copy(traj[:,3::4,:])
+		allo.vtraj_s = np.copy(vtraj[:,3::4,:])
+		allo.traj_sc = np.copy(traj[:,2::4,:])
+		allo.vtraj_sc = np.copy(vtraj[:,2::4,:])
+
+	return allo, data, cols
+    
 def get_clusters(data, n, seed=12):
 	'''Get k-means clusters.
 
