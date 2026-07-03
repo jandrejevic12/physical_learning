@@ -2,6 +2,7 @@ import numpy as np
 
 from plot_imports import *
 from elastic_utils import Elastic
+# from elastic_utils_backup import Elastic
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -1011,7 +1012,7 @@ class Allosteric(Elastic):
 	*****************************************************************************************************
 	'''
 
-	def plot_source(self, ax, source):
+	def plot_source(self, ax, source,source_size=False, color='None',specular=None):
 		'''Plot a source pair.
 		
 		Parameters
@@ -1023,7 +1024,7 @@ class Allosteric(Elastic):
 		'''
 
 		if self.dim == 2: return self._plot_source_2d(ax, source)
-		else: return self._plot_source_3d(ax, source)
+		else: return self._plot_source_3d(ax, source,source_size=source_size, color=color,specular=specular)
 
 	def _plot_source_2d(self, ax, source):
 		'''Plot a source pair.
@@ -1046,7 +1047,7 @@ class Allosteric(Elastic):
 		s = ax.scatter([six, sjx], [siy, sjy], s=60, edgecolor='k', facecolor=pal['blue'], lw=1, zorder=1000)
 		return s
 
-	def _plot_source_3d(self, ax, source):
+	def _plot_source_3d(self, ax, source,source_size=False,color=None,specular=None):
 		'''Plot a source pair.
 		
 		Parameters
@@ -1063,19 +1064,23 @@ class Allosteric(Elastic):
 		'''
 
 		r = 6*self.params['radius']
-		c = 'rgb<0.0,0.4,0.8>'
+		if source_size: r = source_size
+		if color is None:
+			c = 'rgb<0.0,0.4,0.8>'
+		else: c=color
+		if specular is None: specular = 0.1
 
 		return [Sphere(self.pts[source['i']], r,
 				Texture(Pigment('color',c),
 				Finish('ambient',0.24,'diffuse',0.88,
-				'specular',0.1,'phong',0.2,'phong_size',5))),
+				'specular',specular,'phong',0.2,'phong_size',5))),
 
 				Sphere(self.pts[source['j']], r,
 				Texture(Pigment('color',c),
 				Finish('ambient',0.24,'diffuse',0.88,
-				'specular',0.1,'phong',0.2,'phong_size',5)))]
+				'specular',specular,'phong',0.2,'phong_size',5)))]
 
-	def plot_target(self, ax, target):
+	def plot_target(self, ax, target,target_size=False, color='None', specular='None'):
 		'''Plot a target pair.
 		
 		Parameters
@@ -1087,7 +1092,7 @@ class Allosteric(Elastic):
 		'''
 
 		if self.dim == 2: return self._plot_target_2d(ax, target)
-		else: return self._plot_target_3d(ax, target)
+		else: return self._plot_target_3d(ax, target,target_size=target_size, color=color, specular=specular)
 
 	def _plot_target_2d(self, ax, target):
 		'''Plot a target pair.
@@ -1110,7 +1115,7 @@ class Allosteric(Elastic):
 		t = ax.scatter([tix, tjx], [tiy, tjy], s=60, edgecolor='k', facecolor=pal['red'], lw=1, zorder=1000)
 		return t
 
-	def _plot_target_3d(self, ax, target):
+	def _plot_target_3d(self, ax, target,target_size=False,color=None,specular=None):
 		'''Plot a target pair.
 		
 		Parameters
@@ -1127,19 +1132,23 @@ class Allosteric(Elastic):
 		'''
 
 		r = 6*self.params['radius']
-		c = 'rgb<0.9,0.1,0.1>'
+		if target_size: r=target_size
+		if color is None:
+			c = 'rgb<0.9,0.1,0.1>'
+		else: c=color
+		if specular is None: specular = 0.1
 
 		return [Sphere(self.pts[target['i']], r,
 				Texture(Pigment('color',c),
 				Finish('ambient',0.24,'diffuse',0.88,
-				'specular',0.1,'phong',0.2,'phong_size',5))),
+				'specular',specular,'phong',0.2,'phong_size',5))),
 
 				Sphere(self.pts[target['j']], r,
 				Texture(Pigment('color',c),
 				Finish('ambient',0.24,'diffuse',0.88,
-				'specular',0.1,'phong',0.2,'phong_size',5)))]
+				'specular',specular,'phong',0.2,'phong_size',5)))]
 
-	def plot(self, spine=False, contour=False, outline=False, figsize=(5,5), filename=None):
+	def plot(self, spine=False, contour=False, outline=False, figsize=(5,5), filename=None,thickness=False):
 		'''Plot the network.
 		
 		Parameters
@@ -1156,9 +1165,11 @@ class Allosteric(Elastic):
 			The figure size.
 		filename : str, optional
 			The name of the file for saving the plot.
+	   thickness : bool, optional
+			Activates the possibility to draw the thickness of the edges proportionally to the stifnesses
 		'''
 		if self.dim == 2: self._plot_2d(figsize, filename)
-		else: self._plot_3d(spine, contour, outline, figsize, filename)
+		else: self._plot_3d(spine, contour, outline, figsize, filename, thickness)
 
 	def _plot_2d(self, figsize=(5,5), filename=None):
 		'''Plot a 2D network.'''
@@ -1176,20 +1187,22 @@ class Allosteric(Elastic):
 			fig.savefig(filename, bbox_inches='tight')
 		plt.show()
 
-	def _plot_3d(self, spine=False, contour=False, outline=False, figsize=(5,5), filename=None):
+	def _plot_3d(self, spine=False, contour=False, outline=False, figsize=(5,5),fig=None, ax=None, filename=None,thickness=False,alpha_spheres=0,alpha_edges=0,source_size=False, target_size=False,reference_thickness=False,strain_coloring=False,strains=False,strain_cmap=False,color_s = None, color_t=None, specular_s=None, specular_t=None):
 		'''Plot a 3D network.'''
-
-		fig, ax = plt.subplots(1,1,figsize=figsize)
+		if fig:
+			figsize = fig.get_size_inches()
+		else:
+			fig, ax = plt.subplots(1,1,figsize=figsize)
 		width = int(100*figsize[0]); height = int(100*figsize[1])
-
+        
 		bg, lights, camera = self._povray_setup()
-
+        
 		if spine:
 			nodes, pairs = self._get_path()
 			spheres = self._povray_spheres(nodes)
 			edges = self._povray_edges(pairs)
 		else:
-			spheres, edges = self.plot_network(ax)
+			spheres, edges = self.plot_network(ax,thickness,alpha_spheres=alpha_spheres, alpha_edges=alpha_edges,reference_thickness=reference_thickness,strain_coloring=strain_coloring,strains=strains,strain_cmap=strain_cmap)
 
 		if contour:
 			hull = [self._povray_hull()]
@@ -1199,9 +1212,9 @@ class Allosteric(Elastic):
 		objects = [bg]+lights+spheres+edges+hull
 		sites = []
 		for source in self.sources:
-			sites += self.plot_source(ax, source)
+			sites += self.plot_source(ax, source,source_size=source_size,color = color_s, specular = specular_s)
 		for target in self.targets:
-			sites += self.plot_target(ax, target)
+			sites += self.plot_target(ax, target,target_size=target_size,color = color_t, specular = specular_t)
 		objects += sites
 
 		scene = Scene(camera,
@@ -2209,7 +2222,7 @@ class Allosteric(Elastic):
 		v = np.zeros(self.ne)
 		for e,edge in enumerate(self.graph.edges(data=True)):
 			v[e] = edge[2][kind]
-		
+		if vmax==-1: vmax=np.max(v)
 		bins = np.linspace(vmin, vmax, nbins)
 		x = 0.5*(bins[1:]+bins[:-1])
 		y = np.histogram(v, bins)[0]
@@ -2225,6 +2238,25 @@ class Allosteric(Elastic):
 
 		return v
 
+	def distribution_no_plot(self, kind='stiffness'):
+		'''like distribution_plot, but without plotting
+
+		Parameters
+		----------
+		kind : str, optional
+			Which quantity to plot. Valid options are 'stiffness' or 'length'
+		Returns
+		-------
+		ndarray
+			Array of values whose distribution is plotted.
+		'''
+		if kind not in ['stiffness','length']:
+			raise ValueError("'kind' must be 'stiffness' or 'length'.")
+
+		v = np.zeros(self.ne)
+		for e,edge in enumerate(self.graph.edges(data=True)):
+			v[e] = edge[2][kind]
+		return v
 	'''
 	*****************************************************************************************************
 	*****************************************************************************************************
@@ -2525,7 +2557,7 @@ class Allosteric(Elastic):
 			An identifier for the job.
 		hours : int
 			Number of hours to allocate for the job.
-		cmd : str
+		cmd : strsetup_run
 			The command to be executed.
 		'''
 
