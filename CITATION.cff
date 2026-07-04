@@ -2,19 +2,29 @@
 # Visit https://bit.ly/cffinit to generate yours today!
 
 cff-version: 1.2.0
-title: Physical learning with elastic networks
+title: physical_learning
 message: >-
   If you use this software, please cite it using the
   metadata from this file.
 type: software
 authors:
-  - given-names: Jovana
-    family-names: Andrejevic
+  - given-names: Jovana Andrejevic
+    family-names: Kim
     email: jovana@sas.upenn.edu
     orcid: 'https://orcid.org/0000-0002-1969-9291'
+  - given-names: Ben
+    family-names: Pisanty
+    email: pisanty@sas.upenn.edu
+    orcid: 'https://orcid.org/0000-0001-7979-2132'
 repository-code: 'https://github.com/jandrejevic12/physical_learning'
 url: >-
   https://physical-learning.readthedocs.io/en/latest/index.html
+keywords:
+  - allostery
+  - physical learning
+  - coupled learning
+  - mechanical networks
+  - thermal fluctuations
 license: MIT
-commit: 0f6f978d31879935efa781ca8368bc71bdf98814
-date-released: '2023-06-23'
+commit: 6abaf989ef5971849d1576a31e69d9a93d0a408e
+date-released: '2026-07-03'
